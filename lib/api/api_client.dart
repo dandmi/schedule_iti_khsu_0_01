@@ -31,18 +31,6 @@ class SearchResponse {
   }
 }
 
-class GroupsResponse {
-  final List<String> groups;
-
-  GroupsResponse({required this.groups});
-
-  factory GroupsResponse.fromJson(Map<String, dynamic> json) {
-    return GroupsResponse(
-      groups: List<String>.from(json['groups'] ?? []),
-    );
-  }
-}
-
 // ==========================
 // API КЛИЕНТ
 // ==========================
@@ -87,12 +75,6 @@ class ApiClient {
     return ScheduleResponse.fromJson(json);
   }
 
-  // Получить список групп по курсу
-  Future<GroupsResponse> getGroups(int course) async {
-    final uri = Uri.parse('$baseUrl/getgroups/$course');
-    final json = await _getJson(uri);
-    return GroupsResponse.fromJson(json);
-  }
 
   // Поиск
   Future<SearchResponse> search(String query) async {
