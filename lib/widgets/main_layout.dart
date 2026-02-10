@@ -3,12 +3,16 @@ import 'package:flutter/material.dart';
 class MainLayout extends StatelessWidget {
   final Widget body;
   final int currentIndex;
+  final String title;
+
 
   const MainLayout({
     super.key,
     required this.body,
+    required this.title,
     this.currentIndex = 0,
   });
+
 
   void _onItemTapped(int index, BuildContext context) {
     switch (index) {
@@ -23,7 +27,8 @@ class MainLayout extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.green,
-        title: const Text('Расписание'),
+        title: Text(title),
+        centerTitle: true,
       ),
       body: body,
       bottomNavigationBar: BottomNavigationBar(

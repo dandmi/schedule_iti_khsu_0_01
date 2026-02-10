@@ -7,6 +7,7 @@ class NotesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MainLayout(
+      title: 'Заметки',
       body: const Center(child: Text('Заметки пока недоступны')),
       currentIndex: 1,
     );

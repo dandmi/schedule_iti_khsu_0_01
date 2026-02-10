@@ -56,6 +56,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         if (snapshot.hasData && snapshot.data != null) {
           final args = snapshot.data!;
           return MainLayout(
+            title: 'Расписание',
             body: ScheduleExplorerView(
               initialType: args['type'] as ScheduleType,
               initialValue: args['value'] as String,
@@ -66,6 +67,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         } else {
           // Нет сохранённого избранного → показываем пустой экран
           return MainLayout(
+            title: 'Расписание',
             body: const Center(child: Text('Выберите расписание в "Доп. возможностях"')),
             currentIndex: 0,
           );
