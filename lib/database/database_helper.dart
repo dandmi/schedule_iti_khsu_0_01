@@ -19,13 +19,13 @@ class DatabaseHelper {
   static final _lock = Lock(); // ← добавь это
 
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    // ← защищаем инициализацию
+    final existing = _database;
+    if (existing != null) return existing;
+
     await _lock.synchronized(() async {
-      if (_database == null) {
-        _database = await _initDatabase();
-      }
+      _database ??= await _initDatabase();
     });
+
     return _database!;
   }
 

@@ -13,10 +13,13 @@ class AddFavoriteScreen extends StatefulWidget {
 
 class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
   final ApiClient _apiClient = ApiClient();
+  final DatabaseHelper _db = DatabaseHelper(); // ✅ микро-оптимизация: один инстанс
   final TextEditingController _searchController = TextEditingController();
 
   ScheduleType _scheduleType = ScheduleType.group;
   List<String> _suggestions = [];
+
+  int _requestId = 0; // ✅ защита от "старых" ответов поиска
 
   @override
   void dispose() {
@@ -25,15 +28,24 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
   }
 
   Future<void> _performSearch(String query) async {
+    final messenger = ScaffoldMessenger.of(context); // ✅ берём ДО await
+
     if (query.isEmpty) {
-      setState(() {
-        _suggestions = [];
-      });
+      if (!mounted) return;
+      setState(() => _suggestions = []);
       return;
     }
 
+    // ✅ чтобы старые запросы не перетирали новые результаты
+    final currentRequest = ++_requestId;
+
     try {
       final result = await _apiClient.search(query);
+
+      // Если во время ожидания пользователь ввёл новый запрос/сменил тип —
+      // игнорируем устаревший ответ.
+      if (!mounted || currentRequest != _requestId) return;
+
       List<String> items;
       switch (_scheduleType) {
         case ScheduleType.group:
@@ -44,37 +56,38 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
           break;
         case ScheduleType.auditory:
           items = result.auditories;
-          if (items.isEmpty) {
-            items = [query.toUpperCase()];
-          }
+          if (items.isEmpty) items = [query.toUpperCase()];
           break;
       }
-      setState(() {
-        _suggestions = items;
-      });
+
+      setState(() => _suggestions = items);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!mounted) return;
+      messenger.showSnackBar(
         SnackBar(content: Text('Ошибка поиска: $e')),
       );
     }
   }
 
-  void _onItemSelected(String item) async {
-    // Сохраняем в БД
-    await DatabaseHelper().addFavorite(
+  Future<void> _onItemSelected(String item) async {
+    final navigator = Navigator.of(context); // ✅ берём ДО await
+
+    await _db.addFavorite(
       name: item,
-      type: _scheduleType.name, // ← 'group', 'teacher', 'auditory'
+      type: _scheduleType.name, // 'group', 'teacher', 'auditory'
     );
 
     // Возвращаем результат
-    if (!mounted) return;
-    Navigator.pop(context, true); // true = успешно добавлено
+    navigator.pop(true); // ✅ без context после await
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Добавить в избранное')),
+      appBar: AppBar(
+        title: const Text('Добавить в избранное'),
+        centerTitle: true,
+      ),
       body: Column(
         children: [
           // Переключатель типа
@@ -92,6 +105,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
                   _scheduleType = set.first;
                   _searchController.clear();
                   _suggestions = [];
+                  _requestId++; // ✅ инвалидируем текущие запросы
                 });
               },
             ),

@@ -16,14 +16,58 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _db = DatabaseHelper(); // ✅ микро-оптимизация №1
+  final _db = DatabaseHelper();
+
   late Future<List<FavoriteItem>> _favoritesFuture;
+
+  String? _activeType;
+  String? _activeValue;
+
+  final _scrollCtrl = ScrollController();
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
 
   @override
   void initState() {
     super.initState();
     _favoritesFuture = _db.getFavorites();
+    _loadActive();
+    _scrollCtrl.addListener(_updateScrollHints);
   }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_updateScrollHints);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadActive() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
+    setState(() {
+      _activeType = prefs.getString('last_favorite_type');
+      _activeValue = prefs.getString('last_favorite_value');
+    });
+  }
+
+  void _updateScrollHints() {
+    if (!_scrollCtrl.hasClients) return;
+
+    final pos = _scrollCtrl.position;
+    final left = pos.pixels > 2;
+    final right = pos.pixels < (pos.maxScrollExtent - 2);
+
+    if (left != _canScrollLeft || right != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = left;
+        _canScrollRight = right;
+      });
+    }
+  }
+
 
   void _refreshFavorites() {
     setState(() {
@@ -64,12 +108,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: () async {
                         final added = await Navigator.push<bool>(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const AddFavoriteScreen(),
-                          ),
+                          MaterialPageRoute(builder: (_) => const AddFavoriteScreen()),
                         );
-
-                        if (!mounted) return; // ✅ микро-оптимизация №2
+                        if (!mounted) return;
                         if (added == true) _refreshFavorites();
                       },
                       icon: const Icon(Icons.add),
@@ -79,93 +120,227 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }
 
-              return SizedBox(
-                height: 80,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: favorites.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == favorites.length) {
-                      return Card(
-                        margin: const EdgeInsets.only(right: 8),
-                        child: IconButton(
-                          icon: const Icon(Icons.add, size: 32),
-                          onPressed: () async {
-                            final added = await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const AddFavoriteScreen(),
-                              ),
-                            );
+              // после первой отрисовки корректно обновим подсказки скролла
+              WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollHints());
 
-                            if (!mounted) return; // ✅ микро-оптимизация №2
-                            if (added == true) _refreshFavorites();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: 52,
+                    child: Stack(
+                      children: [
+                        ListView.separated(
+                          controller: _scrollCtrl,
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.only(right: 8),
+                          itemCount: favorites.length + 1,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            if (index == favorites.length) {
+                              // кнопка "добавить" как чип
+                              return _AddChip(
+                                onTap: () async {
+                                  final added = await Navigator.push<bool>(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const AddFavoriteScreen()),
+                                  );
+                                  if (!mounted) return;
+                                  if (added == true) _refreshFavorites();
+                                },
+                              );
+                            }
+
+                            final item = favorites[index];
+                            final isActive =
+                                _activeType == item.scheduleType.name && _activeValue == item.name;
+
+                            return _FavoriteChip(
+                              item: item,
+                              isActive: isActive,
+                                onTap: () async {
+                                  final messenger = ScaffoldMessenger.of(context);
+
+                                  final prefs = await SharedPreferences.getInstance();
+                                  await prefs.setString('last_favorite_type', item.scheduleType.name);
+                                  await prefs.setString('last_favorite_value', item.name);
+
+                                  if (!mounted) return;
+
+                                  setState(() {
+                                    _activeType = item.scheduleType.name;
+                                    _activeValue = item.name;
+                                  });
+
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text('Выбрано: ${item.name}')),
+                                  );
+
+                                  widget.onScheduleChanged?.call();
+                                }
+
+                            );
                           },
                         ),
-                      );
-                    }
 
-                    return _buildFavoriteChip(favorites[index]);
-                  },
-                ),
+                        // подсказка "есть ещё слева"
+                        if (_canScrollLeft)
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: _EdgeHint(direction: AxisDirection.left),
+                            ),
+                          ),
+
+                        // подсказка "есть ещё справа"
+                        if (_canScrollRight)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: _EdgeHint(direction: AxisDirection.right),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                ],
               );
             },
           ),
+
         ],
       ),
     );
   }
 
-  Widget _buildFavoriteChip(FavoriteItem item) {
-    return Card(
-      margin: const EdgeInsets.only(right: 8),
-      child: InkWell(
-        onTap: () async {
-          final prefs = await SharedPreferences.getInstance();
+}
 
-          await prefs.setString(
-            'last_favorite_type',
-            item.scheduleType.name,
-          );
-          await prefs.setString(
-            'last_favorite_value',
-            item.name,
-          );
 
-          if (!mounted) return; // ✅ микро-оптимизация №2
+class _FavoriteChip extends StatelessWidget {
+  final FavoriteItem item;
+  final bool isActive;
+  final VoidCallback onTap;
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Выбрано: ${item.name}')),
-          );
+  const _FavoriteChip({
+    required this.item,
+    required this.isActive,
+    required this.onTap,
+  });
 
-          widget.onScheduleChanged?.call();
-        },
-        child: Container(
-          width: 120,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                item.scheduleType == ScheduleType.group
-                    ? Icons.group
-                    : item.scheduleType == ScheduleType.teacher
-                    ? Icons.person
-                    : Icons.location_on,
-                size: 20,
-              ),
-              const SizedBox(height: 4),
-              Text(
+  @override
+  Widget build(BuildContext context) {
+    final icon = item.scheduleType == ScheduleType.group
+        ? Icons.group
+        : item.scheduleType == ScheduleType.teacher
+        ? Icons.person
+        : Icons.location_on;
+
+    final bg = isActive ? Colors.green.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.12);
+    final border = isActive ? Colors.green : Colors.transparent;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: border, width: 1.2),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: isActive ? Colors.green : Colors.black54),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
                 item.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12),
+                style: TextStyle(
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
+            ),
+            if (isActive) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.check_circle, size: 16, color: Colors.green),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 }
+
+class _AddChip extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddChip({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha:0.12),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add, size: 18),
+            SizedBox(width: 6),
+            Text('Добавить'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EdgeHint extends StatelessWidget {
+  final AxisDirection direction;
+
+  const _EdgeHint({required this.direction});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLeft = direction == AxisDirection.left;
+
+    return Container(
+      width: 34,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+          end: isLeft ? Alignment.centerRight : Alignment.centerLeft,
+          colors: [
+            Colors.white,
+            Colors.white.withValues(alpha: 0.0),
+          ],
+        ),
+      ),
+      child: Align(
+        alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+        child: Icon(
+          isLeft ? Icons.chevron_left : Icons.chevron_right,
+          color: Colors.black38,
+        ),
+      ),
+    );
+  }
+}
+
