@@ -30,6 +30,7 @@ class MainLayout extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.green,
+        centerTitle: true,
         title: Text(appTitle),
       ),
       body: body,
