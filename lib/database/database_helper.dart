@@ -8,6 +8,8 @@ import 'package:schedule_iti_khsu_0_01/models/lesson.dart';
 import '../models/favorite_item.dart';
 import 'package:synchronized/synchronized.dart';
 
+import '../models/note.dart';
+
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   factory DatabaseHelper() => _instance;
@@ -218,6 +220,69 @@ class DatabaseHelper {
       orderBy: 'name',
     );
     return maps.map((row) => row['name'] as String).toList();
+  }
+
+
+
+  // ===== NOTES =====
+
+  Future<int> addNote({
+    String? title,
+    String? description,
+    int? lessonId,
+  }) async {
+    final db = await database;
+    return db.insert('note', {
+      'title': title,
+      'description': description,
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'lesson_id': lessonId,
+    });
+  }
+
+  Future<int> updateNote({
+    required int noteId,
+    String? title,
+    String? description,
+  }) async {
+    final db = await database;
+    return db.update(
+      'note',
+      {
+        'title': title,
+        'description': description,
+      },
+      where: 'note_id = ?',
+      whereArgs: [noteId],
+    );
+  }
+
+  Future<int> deleteNote(int noteId) async {
+    final db = await database;
+    return db.delete('note', where: 'note_id = ?', whereArgs: [noteId]);
+  }
+
+  Future<List<Note>> getNotes({int? lessonId}) async {
+    final db = await database;
+    final maps = await db.query(
+      'note',
+      where: lessonId != null ? 'lesson_id = ?' : null,
+      whereArgs: lessonId != null ? [lessonId] : null,
+      orderBy: 'created_at DESC',
+    );
+    return maps.map((e) => Note.fromMap(e)).toList();
+  }
+
+  Future<Note?> getNoteById(int noteId) async {
+    final db = await database;
+    final maps = await db.query(
+      'note',
+      where: 'note_id = ?',
+      whereArgs: [noteId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return Note.fromMap(maps.first);
   }
 
 }

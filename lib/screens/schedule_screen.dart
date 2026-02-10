@@ -56,7 +56,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         if (snapshot.hasData && snapshot.data != null) {
           final args = snapshot.data!;
           return MainLayout(
-            title: 'Расписание',
             body: ScheduleExplorerView(
               initialType: args['type'] as ScheduleType,
               initialValue: args['value'] as String,
