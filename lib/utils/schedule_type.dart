@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 enum ScheduleType { group, teacher, auditory }
 
 extension ScheduleTypeExt on ScheduleType {
@@ -12,14 +14,14 @@ extension ScheduleTypeExt on ScheduleType {
     }
   }
 
-  String get iconData {
+  IconData get icon {
     switch (this) {
       case ScheduleType.group:
-        return '👥';
+        return Icons.group;
       case ScheduleType.teacher:
-        return '👨‍🏫';
+        return Icons.person;
       case ScheduleType.auditory:
-        return '🚪';
+        return Icons.location_on;
     }
   }
 }
