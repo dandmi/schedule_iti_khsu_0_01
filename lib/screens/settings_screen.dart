@@ -75,6 +75,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+
+  Future<void> _confirmDelete(FavoriteItem item) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    final bool? ok = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final icon = item.scheduleType == ScheduleType.group
+            ? Icons.group
+            : item.scheduleType == ScheduleType.teacher
+            ? Icons.person
+            : Icons.location_on;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: Icon(icon),
+                  title: Text(item.name),
+                  subtitle: const Text('Удалить из избранного?'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Отмена'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Удалить'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    // Узнаём, было ли это активное избранное
+    final prefs = await SharedPreferences.getInstance();
+    final activeType = prefs.getString('last_favorite_type');
+    final activeValue = prefs.getString('last_favorite_value');
+    final isActive = (activeType == item.type && activeValue == item.name);
+
+    // Удаляем из БД
+    await _db.removeFavorite(item.id);
+
+    if (!mounted) return;
+
+    // Если удалили активное — очищаем prefs, чтобы расписание стало "выберите..."
+    if (isActive) {
+      await prefs.remove('last_favorite_type');
+      await prefs.remove('last_favorite_value');
+
+      setState(() {
+        _activeType = null;
+        _activeValue = null;
+      });
+
+      widget.onScheduleChanged?.call();
+    }
+
+    _refreshFavorites();
+
+    messenger.showSnackBar(
+      SnackBar(content: Text('Удалено: ${item.name}')),
+    );
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -178,7 +264,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   );
 
                                   widget.onScheduleChanged?.call();
-                                }
+                                },
+
+                                onLongPress: () => _confirmDelete(item),
 
                             );
                           },
@@ -210,6 +298,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
 
                   const SizedBox(height: 8),
+                  if (favorites.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Долгое нажатие — удалить',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
 
                 ],
               );
@@ -228,11 +325,13 @@ class _FavoriteChip extends StatelessWidget {
   final FavoriteItem item;
   final bool isActive;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _FavoriteChip({
     required this.item,
     required this.isActive,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -249,6 +348,7 @@ class _FavoriteChip extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         constraints: const BoxConstraints(minWidth: 120),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -277,7 +377,9 @@ class _FavoriteChip extends StatelessWidget {
               const Icon(Icons.check_circle, size: 16, color: Colors.green),
             ],
           ],
+
         ),
+
       ),
     );
   }
