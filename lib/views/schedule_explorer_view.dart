@@ -1,455 +1,496 @@
 import 'package:flutter/material.dart';
 import 'package:schedule_iti_khsu_0_01/api/api_client.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
 import '../database/database_helper.dart';
 import '../models/schedule_response.dart';
 import '../models/lesson.dart';
 import '../utils/schedule_type.dart';
 
-
 class ScheduleExplorerView extends StatefulWidget {
-  final ScheduleType? initialType;
-  final String? initialValue;
-  final bool isFavorite; // ← новый флаг
+  final ScheduleType initialType;
+  final String initialValue;
+  final bool isFavorite;
 
   const ScheduleExplorerView({
     super.key,
-    this.initialType,
-    this.initialValue,
-    this.isFavorite = false,
+    required this.initialType,
+    required this.initialValue,
+    this.isFavorite = true,
   });
 
   @override
   State<ScheduleExplorerView> createState() => _ScheduleExplorerViewState();
 }
 
+class _DayData {
+  final ScheduleResponse schedule;
+  final Map<int, ({String start, String end})> slots;
+  _DayData(this.schedule, this.slots);
+}
+
 
 class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
-  Future<ScheduleResponse>? _scheduleFuture;
   final ApiClient _apiClient = ApiClient();
-  ScheduleType _scheduleType = ScheduleType.group;
-  String? _selectedItem;
+  final DatabaseHelper _db = DatabaseHelper();
+
+  late ScheduleType _scheduleType;
+  late String _selectedItem;
   DateTime _selectedDate = DateTime.now();
-  final TextEditingController _searchController = TextEditingController();
-  List<String> _suggestions = [];
-  bool _isFavorite = false;
 
-  Future<ScheduleResponse> _getScheduleFuture() {
-    // Если уже есть Future — возвращаем его
-    if (_scheduleFuture != null) {
-      return _scheduleFuture!;
-    }
+  Future<_DayData>? _dayFuture;
 
-    // Иначе создаём новый
-    _scheduleFuture = _loadScheduleFromApiOrCache();
-    return _scheduleFuture!;
-  }
 
   @override
   void initState() {
     super.initState();
-
-    // Инициализируем из widget
-    _scheduleType = widget.initialType ?? ScheduleType.group;
-    _selectedItem = widget.initialValue; // без заглушки!
+    _scheduleType = widget.initialType;
+    _selectedItem = widget.initialValue;
     _selectedDate = DateTime.now();
-    _isFavorite = widget.isFavorite;
-
-    // Если не избранное — подставляем в поиск
-    if (_selectedItem != null && !_isFavorite) {
-      _searchController.text = _selectedItem!;
-    }
   }
 
   @override
   void didUpdateWidget(covariant ScheduleExplorerView oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Если изменились входные параметры — обновляем состояние
     if (widget.initialType != oldWidget.initialType ||
         widget.initialValue != oldWidget.initialValue ||
         widget.isFavorite != oldWidget.isFavorite) {
-
-      _scheduleType = widget.initialType ?? ScheduleType.group;
-      _selectedItem = widget.initialValue ?? 'М-124-1';
-      _isFavorite = widget.isFavorite;
-
-      // Сбрасываем Future, чтобы загрузить новое расписание
-      _scheduleFuture = null;
+      _scheduleType = widget.initialType;
+      _selectedItem = widget.initialValue;
+      _dayFuture = null;
     }
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  // ---------- helpers ----------
+
+  String _dateStr(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+
+  IconData _typeIcon(ScheduleType t) => switch (t) {
+    ScheduleType.group => Icons.group,
+    ScheduleType.teacher => Icons.person,
+    ScheduleType.auditory => Icons.location_on,
+  };
+
+  Color _typeColor(String typeLesson) {
+    final t = typeLesson.toLowerCase().trim();
+
+    // зачеты/экзамены
+    if (t.contains('зач') || t.contains('экз')) return Colors.red;
+
+    // лабораторные
+    if (t.contains('лаб')) return Colors.orange;
+
+    // практика
+    if (t.contains('пр')) return Colors.yellow.shade700;
+
+    // лекция
+    if (t.contains('л')) return Colors.green;
+
+    return Colors.black54;
   }
 
-  Future<ScheduleResponse> _loadScheduleFromApiOrCache() async {
-    debugPrint('🚀 НАЧАЛО _loadScheduleFromApiOrCache');
-    // Добавь эту проверку СРАЗУ
-    if (_selectedItem == null) {
-      debugPrint('❌ _selectedItem is NULL!');
-      throw Exception('Нет выбранного элемента');
+
+  void _changeDate(int deltaDays) {
+    setState(() {
+      _selectedDate = _selectedDate.add(Duration(days: deltaDays));
+      _dayFuture = null;
+    });
+  }
+
+  // ---------- data load ----------
+
+  Future<_DayData> _getDayFuture() {
+    _dayFuture ??= _loadDay(forceRefresh: false);
+    return _dayFuture!;
+  }
+
+  Future<_DayData> _loadDay({required bool forceRefresh}) async {
+    final schedule = await _loadScheduleFromApiOrCache(forceRefresh: forceRefresh);
+    final slots = await _db.getTimeSlots();
+    return _DayData(schedule, slots);
+  }
+
+
+
+
+  Future<ScheduleResponse> _loadScheduleFromApiOrCache({required bool forceRefresh}) async {
+    final dateStr = _dateStr(_selectedDate);
+    final targetType = _scheduleType.name; // group/teacher/auditory
+    final targetValue = _selectedItem;
+
+    debugPrint('📅 Запрос: $targetType / $targetValue / $dateStr (force=$forceRefresh)');
+
+    // 1) если не форсим — читаем кэш
+    if (!forceRefresh) {
+      final cached = await _db.getSchedule(
+        date: dateStr,
+        targetType: targetType,
+        targetValue: targetValue,
+      );
+
+      if (cached.isNotEmpty) {
+        return ScheduleResponse(
+          weekday: _selectedDate.weekday,
+          weekNumber: 0,
+          lessons: cached,
+        );
+      }
+    } else {
+      // при forceRefresh можно очистить старые записи этой даты/цели
+      // saveSchedule у тебя и так delete+insert, поэтому отдельно чистить не обязательно
     }
-    final String dateStr = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-    final String targetType = _scheduleType.name;
-    final String targetValue = _selectedItem!;
 
-    // Проверка входных данных
-    if (targetValue.isEmpty) {
-      throw Exception('targetValue пустой!');
+    // 2) грузим из API
+    late final ScheduleResponse response;
+    switch (_scheduleType) {
+      case ScheduleType.group:
+        response = await _apiClient.getGroupSchedule(targetValue, _selectedDate);
+        break;
+      case ScheduleType.teacher:
+        response = await _apiClient.getTeacherSchedule(targetValue, _selectedDate);
+        break;
+      case ScheduleType.auditory:
+        response = await _apiClient.getAuditorySchedule(targetValue, _selectedDate);
+        break;
     }
 
-    if (_selectedItem == null) {
-      throw Exception('Нет выбранного элемента!');
-    }
-
-    debugPrint('📥 Запрос расписания: $targetType / $targetValue на $dateStr');
-
-    // 1. Попробуем загрузить из кэша
-    final cachedLessons = await DatabaseHelper().getSchedule(
+    // 3) сохраняем в SQLite
+    await _db.saveSchedule(
       date: dateStr,
+      weekday: response.weekday,
+      lessons: response.lessons,
       targetType: targetType,
       targetValue: targetValue,
     );
 
-    if (cachedLessons.isNotEmpty) {
-      debugPrint('📦 Возвращено из кэша (${cachedLessons.length} занятий)');
-      return ScheduleResponse(
-        weekday: _determineWeekday(_selectedDate), // или сохрани weekday в БД
-        weekNumber: 0,
-        lessons: cachedLessons,
-      );
-    }
-    debugPrint('🌐 Кэш пуст, запрашиваем API...');
+    return response;
+  }
 
-    // 2. Кэша нет → пробуем загрузить из API
+  Future<void> _refreshSchedule() async {
+    final messenger = ScaffoldMessenger.of(context);
+
     try {
-      late ScheduleResponse response;
-      switch (_scheduleType) {
-        case ScheduleType.group:
-          response = await ApiClient().getGroupSchedule(targetValue, _selectedDate);
-          break;
-        case ScheduleType.teacher:
-          response = await ApiClient().getTeacherSchedule(targetValue, _selectedDate);
-          break;
-        case ScheduleType.auditory:
-          response = await ApiClient().getAuditorySchedule(targetValue, _selectedDate);
-          break;
-      }
-      debugPrint('💾 Сохраняем в БД и возвращаем');
+      final freshDay = await _loadDay(forceRefresh: true);
 
-      // 3. Сохраняем в БД при успешной загрузке
-      await DatabaseHelper().saveSchedule(
-        date: dateStr,
-        weekday: response.weekday,
-        lessons: response.lessons,
-        targetType: targetType,
-        targetValue: targetValue,
-      );
-
-      return response;
-    } catch (e) {
-      debugPrint('💥 Ошибка загрузки:');
-
-      // 4. Если API недоступен — пробуем ещё раз прочитать кэш (вдруг появился?)
-      // Но скорее всего, кэша нет → покажем "нет данных + нет интернета"
-      final fallbackCached = await DatabaseHelper().getSchedule(
-        date: dateStr,
-        targetType: targetType,
-        targetValue: targetValue,
-      );
-
-      if (fallbackCached.isNotEmpty) {
-        // Маловероятно, но возможно (например, параллельный запрос)
-        return ScheduleResponse(
-          weekday: _determineWeekday(_selectedDate),
-          weekNumber: 0,
-          lessons: fallbackCached,
-        );
-      }
-
-      // 5. Нет кэша и нет интернета → выбрасываем понятную ошибку
-      throw Exception('Нет подключения к интернету. Расписание не загружено.');
-    }
-  }
-
-// Вспомогательная функция для определения дня недели (1=пн, ..., 7=вс)
-  int _determineWeekday(DateTime date) {
-    // В Dart: Monday = 1, Sunday = 7
-    return date.weekday;
-  }
-
-  Future<void> _performSearch(String query) async {
-    if (query.isEmpty) {
+      if (!mounted) return;
       setState(() {
-        _suggestions = [];
+        _dayFuture = Future.value(freshDay);
       });
-      return;
-    }
 
-    // Сначала попробуем найти среди избранных (работает без интернета)
-    final favorites = await DatabaseHelper().getFavoritesByType(_scheduleType.name);
-    final filteredFavorites = favorites
-        .where((name) => name.toLowerCase().contains(query.toLowerCase()))
-        .toList();
-
-    List<String> apiResults = [];
-
-    // Попробуем загрузить из API, только если есть интернет
-    try {
-      final result = await _apiClient.search(query);
-      switch (_scheduleType) {
-        case ScheduleType.group:
-          apiResults = result.names;
-          break;
-        case ScheduleType.teacher:
-          apiResults = result.teacherNames;
-          break;
-        case ScheduleType.auditory:
-          apiResults = result.auditories;
-          if (apiResults.isEmpty) {
-            apiResults = [query.toUpperCase()];
-          }
-          break;
-      }
+      messenger.showSnackBar(const SnackBar(content: Text('Расписание обновлено')));
     } catch (e) {
-      // Игнорируем ошибку — оставим только избранные
-      debugPrint('Поиск недоступен (нет интернета): $e');
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Не удалось обновить: $e')));
     }
-
-    // Объединим: сначала API-результаты, потом избранные (или наоборот)
-    final allSuggestions = [...apiResults, ...filteredFavorites];
-
-    // Уберём дубликаты, сохранив порядок
-    final uniqueSuggestions = <String>[];
-    for (final item in allSuggestions) {
-      if (!uniqueSuggestions.contains(item)) {
-        uniqueSuggestions.add(item);
-      }
-    }
-
-    setState(() {
-      _suggestions = uniqueSuggestions;
-    });
   }
 
-  void _onItemSelected(String item) {
-    // Сохраняем как последнее избранное
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setString('last_favorite_type', _scheduleType.name);
-      prefs.setString('last_favorite_value', item);
-    });
 
-    setState(() {
-      _selectedItem = item;
-      _suggestions = [];
-      _searchController.text = item;
-      _scheduleFuture = null;
-    });
-  }
-
-  void _changeDate(Duration offset) {
-    setState(() {
-      _selectedDate = _selectedDate.add(offset);
-      _scheduleFuture = null;
-    });
-  }
-
-  void _goToToday() {
-    setState(() {
-      _selectedDate = DateTime.now();
-      _scheduleFuture = null;
-    });
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day}.${date.month.toString().padLeft(2, '0')}.${date.year}';
-  }
+  // ---------- UI ----------
 
   @override
   Widget build(BuildContext context) {
+    final header = ScheduleTopHeader(
+      title: _selectedItem,
+      icon: _typeIcon(_scheduleType),
+      onRefresh: _refreshSchedule,
+      // если позже решишь добавить выбор прямо тут — повесь onTap
+      onTap: null,
+      showDropdownChevron: false, // сейчас не делаем dropdown
+    );
+
     return Column(
       children: [
-        // 🔸 1. Переключатель типа — ОДИН раз
-        if (!_isFavorite)
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: SegmentedButton<ScheduleType>(
-              segments: const [
-                ButtonSegment<ScheduleType>(value: ScheduleType.group, label: Text('Группа')),
-                ButtonSegment<ScheduleType>(value: ScheduleType.teacher, label: Text('Преподаватель')),
-                ButtonSegment<ScheduleType>(value: ScheduleType.auditory, label: Text('Аудитория')),
-              ],
-              selected: {_scheduleType},
-              onSelectionChanged: (Set<ScheduleType> newSelection) {
-                if (newSelection.isEmpty) return;
-                final newValue = newSelection.first;
-                setState(() {
-                  _scheduleType = newValue;
-                  _selectedItem = null;
-                  _searchController.clear();
-                  _suggestions = [];
-                  _scheduleFuture = null;
-                });
-              },
-            ),
-          ),
+        header,
 
-        // 🔸 Заголовок ИЛИ поиск
-        if (_isFavorite && _selectedItem != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Card(
-              child: ListTile(
-                leading: Icon(
-                  _scheduleType == ScheduleType.group
-                      ? Icons.group
-                      : _scheduleType == ScheduleType.teacher
-                      ? Icons.person
-                      : Icons.location_on,
-                ),
-                title: Text(_selectedItem!),
-                subtitle: Text(_scheduleType.label),
-              ),
-            ),
-          )
-        else
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _performSearch,
-              decoration: InputDecoration(
-                hintText: 'Введите ${_scheduleType.label.toLowerCase()}...',
-                prefixIcon: Icon(
-                  _scheduleType == ScheduleType.group
-                      ? Icons.group
-                      : _scheduleType == ScheduleType.teacher
-                      ? Icons.person
-                      : Icons.location_on,
-                ),
-              ),
-            ),
-          ),
+        // панель даты (как на скрине)
+        _DatePager(
+          dateText: _formatDate(_selectedDate),
+          onPrev: () => _changeDate(-1),
+          onNext: () => _changeDate(1),
+        ),
 
-        // 🔸 3. Подсказки — ТОЛЬКО если НЕ избранное
-        if (!_isFavorite && _suggestions.isNotEmpty)
-          Container(
-            height: 150,
-            padding: const EdgeInsets.all(8.0),
-            color: Colors.grey.shade100,
-            child: ListView.builder(
-              itemCount: _suggestions.length,
-              itemBuilder: (context, index) {
-                final item = _suggestions[index];
-                return ListTile(
-                  title: Text(item),
-                  onTap: () => _onItemSelected(item),
+        Expanded(
+          child: FutureBuilder<_DayData>(
+            future: _getDayFuture(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('Ошибка: ${snapshot.error}'));
+              }
+
+              final day = snapshot.data!;
+              final lessons = day.schedule.lessons;
+              final slots = day.slots;
+
+
+              if (lessons.isEmpty) {
+                return const Center(
+                  child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
                 );
-              },
-            ),
-          ),
+              }
 
-        const SizedBox(height: 16),
-
-        // 🔸 4. Расписание (если выбран элемент)
-        if (_selectedItem != null) ...[
-          // панель даты
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextButton.icon(
-                onPressed: () => _changeDate(const Duration(days: -1)),
-                icon: const Icon(Icons.arrow_back),
-                label: const Text('Вчера'),
-              ),
-              TextButton(
-                onPressed: _goToToday,
-                child: Text(_formatDate(_selectedDate)),
-              ),
-              TextButton.icon(
-                onPressed: () => _changeDate(const Duration(days: 1)),
-                icon: const Icon(Icons.arrow_forward),
-                label: const Text('Завтра'),
-              ),
-            ],
-          ),
-
-
-          const Divider(),
-          // Расписание
-
-          Expanded(
-            child: FutureBuilder<ScheduleResponse>(
-              future: _getScheduleFuture(),
-              builder: (context, snapshot) {
-                debugPrint('🔄 FutureBuilder.builder вызван, состояние: ${snapshot.connectionState}');
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                } else if (snapshot.hasError) {
-                  debugPrint('❌ Ошибка: ${snapshot.error}');
-                  return Center(child: Text('Ошибка: ${snapshot.error}'));
-                } else if (!snapshot.hasData || snapshot.data!.lessons.isEmpty) {
-                  return const Center(
-                    child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                itemCount: lessons.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  return LessonCard(
+                    lesson: lessons[index],
+                    number: index + 1,
+                    typeColor: _typeColor(lessons[index].typeLesson),
+                    slots: slots, // если ты уже перешёл на time_slot
+                    scheduleType: _scheduleType, // ✅ добавь
                   );
-                } else {
-                  final schedule = snapshot.data!;
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: schedule.lessons.length,
-                    itemBuilder: (context, index) {
-                      final lesson = schedule.lessons[index];
-                      return _buildLessonTile(context, lesson);
-                    },
-                  );
-                }
-              },
-            ),
+
+                },
+              );
+            },
           ),
-        ] else
-          Expanded(
-            child: Container(
-              color: Colors.red,
-              child: const Center(child: Text('❌ НЕТ ВЫБРАННОГО ЭЛЕМЕНТА', style: TextStyle(color: Colors.white))),
-            ),
-          ),
+        ),
       ],
     );
   }
+}
 
-  Widget _buildLessonTile(BuildContext context, Lesson lesson) {
-    final timeSlots = {
-      1: '08:30–10:00',
-      2: '10:10–11:40',
-      3: '12:00–13:30',
-      4: '13:40–15:10',
-      5: '15:20–16:50',
-      6: '17:00–18:30',
-      7: '18:40–20:10',
-    };
-    final timeStr = timeSlots[lesson.time] ?? '${lesson.time} пара';
+// ---------------- Widgets ----------------
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        title: Text(lesson.subject, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_scheduleType != ScheduleType.group)
-              Text('👥 ${lesson.group.join(', ')}'),
-            if (_scheduleType != ScheduleType.teacher)
-              Text('👨‍🏫 ${lesson.teacher}'),
-            if (_scheduleType != ScheduleType.auditory)
-              Text('🚪 ${lesson.auditory}'),
-            Text('📚 ${lesson.typeLesson}'),
-          ],
+class ScheduleTopHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final VoidCallback onRefresh;
+  final VoidCallback? onTap;
+  final bool showDropdownChevron;
+
+  const ScheduleTopHeader({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.onRefresh,
+    this.onTap,
+    this.showDropdownChevron = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.green,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: onTap,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(icon, color: Colors.black87),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                        if (showDropdownChevron) ...[
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_drop_down, color: Colors.black87),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton(
+                tooltip: 'Обновить',
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh, color: Colors.black87),
+              ),
+            ],
+          ),
         ),
-        trailing: Text(timeStr, style: const TextStyle(color: Colors.grey)),
       ),
     );
   }
 }
+
+class _DatePager extends StatelessWidget {
+  final String dateText;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+
+  const _DatePager({
+    required this.dateText,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0xFFE6E6E6))),
+        ),
+        child: Row(
+          children: [
+            IconButton(onPressed: onPrev, icon: const Icon(Icons.chevron_left)),
+            Expanded(
+              child: Center(
+                child: Text(
+                  dateText,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            IconButton(onPressed: onNext, icon: const Icon(Icons.chevron_right)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class LessonCard extends StatelessWidget {
+  final Lesson lesson;
+  final int number;
+  final Color typeColor;
+  final ScheduleType scheduleType;
+
+  // если используешь time_slot из БД:
+  final Map<int, ({String start, String end})>? slots;
+
+  const LessonCard({
+    super.key,
+    required this.lesson,
+    required this.number,
+    required this.typeColor,
+    required this.scheduleType,
+    this.slots,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    String start = '--:--';
+    String end = '--:--';
+
+    if (slots != null) {
+      final slot = slots![lesson.time];
+      start = slot?.start ?? '--:--';
+      end = slot?.end ?? '--:--';
+    } else {
+      // fallback (если ещё не подключал time_slot)
+      const timeSlots = {
+        1: ('08:00', '09:30'),
+        2: ('09:50', '11:20'),
+        3: ('11:40', '13:10'),
+        4: ('13:40', '15:10'),
+        5: ('15:20', '16:50'),
+        6: ('17:00', '18:30'),
+        7: ('18:40', '20:10'),
+      };
+      final slot = timeSlots[lesson.time];
+      start = slot?.$1 ?? '--:--';
+      end = slot?.$2 ?? '--:--';
+    }
+
+    // ✅ что показывать:
+    final showTeacher = scheduleType != ScheduleType.teacher;
+    final showAuditory = scheduleType != ScheduleType.auditory;
+    final showGroups = scheduleType != ScheduleType.group;
+
+    final groupsText = lesson.group.isEmpty ? '' : lesson.group.join(', ');
+
+    return Material(
+      elevation: 1.2,
+      borderRadius: BorderRadius.circular(16),
+      color: Colors.white,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black26),
+              ),
+              child: Center(
+                child: Text(
+                  '$start\n-\n$end',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    lesson.subject,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    lesson.typeLesson,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: typeColor,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  if (showGroups && groupsText.isNotEmpty) ...[
+                    Text('Группы: $groupsText', style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 2),
+                  ],
+
+                  if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
+                    Text(lesson.teacher, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(height: 2),
+                  ],
+
+                  if (showAuditory && lesson.auditory.trim().isNotEmpty)
+                    Text('Аудитория: ${lesson.auditory}', style: const TextStyle(fontSize: 14)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              '№$number',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

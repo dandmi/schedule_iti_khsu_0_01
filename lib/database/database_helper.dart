@@ -181,6 +181,22 @@ class DatabaseHelper {
     return maps.map((e) => Lesson.fromMap(e)).toList();
   }
 
+  Future<Map<int, ({String start, String end})>> getTimeSlots() async {
+    final db = await database;
+    final maps = await db.query('time_slot');
+
+    final out = <int, ({String start, String end})>{};
+    for (final row in maps) {
+      final id = row['slot_id'] as int;
+      out[id] = (
+      start: row['start_time'] as String,
+      end: row['end_time'] as String,
+      );
+    }
+    return out;
+  }
+
+
   // Получить все избранные
   Future<List<FavoriteItem>> getFavorites() async {
     final db = await database;
