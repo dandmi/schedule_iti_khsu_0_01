@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../database/database_helper.dart';
 import '../models/note.dart';
 import 'note_edit_screen.dart';
@@ -16,7 +15,14 @@ class NotesScreenState extends State<NotesScreen> {
 
   void _reload() {
     if (!mounted) return;
-    setState(() {}); // ✅ просто перерисовать -> FutureBuilder заново вызовет getNotes()
+    setState(() {});
+  }
+
+  String _two(int value) => value.toString().padLeft(2, '0');
+
+  String _formatDateTime(int millis) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    return '${_two(dt.day)}.${_two(dt.month)}.${dt.year} ${_two(dt.hour)}:${_two(dt.minute)}';
   }
 
   Future<void> _openCreate() async {
@@ -41,13 +47,12 @@ class NotesScreenState extends State<NotesScreen> {
     _reload();
   }
 
-  // Если HomeScreen дергает этот метод для FAB — он остаётся
   Future<void> openCreate() async => _openCreate();
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Note>>(
-      future: _db.getNotes(), // ✅ новый Future при каждом build
+      future: _db.getNotes(),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
@@ -58,6 +63,7 @@ class NotesScreenState extends State<NotesScreen> {
         }
 
         final notes = snap.data ?? [];
+
         if (notes.isEmpty) {
           return const Center(
             child: Text('Пока нет заметок. Нажми "+" чтобы добавить.'),
@@ -69,15 +75,33 @@ class NotesScreenState extends State<NotesScreen> {
           separatorBuilder: (_, __) => const Divider(height: 1),
           itemBuilder: (context, i) {
             final n = notes[i];
+
             final title =
             (n.title ?? '').trim().isEmpty ? '(без названия)' : n.title!.trim();
+
             final desc = (n.description ?? '').trim();
+            final subject = (n.subject ?? '').trim();
+            final dueText =
+            n.dueAt != null ? 'Срок: ${_formatDateTime(n.dueAt!)}' : '';
+
+            final subtitleParts = <String>[];
+            if (subject.isNotEmpty) subtitleParts.add('Предмет: $subject');
+            if (desc.isNotEmpty) subtitleParts.add(desc);
+            if (dueText.isNotEmpty) subtitleParts.add(dueText);
 
             return ListTile(
-              title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: desc.isEmpty
+              title: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: subtitleParts.isEmpty
                   ? null
-                  : Text(desc, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  : Text(
+                subtitleParts.join('\n'),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+              ),
               onTap: () => _openEdit(n),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:schedule_iti_khsu_0_01/api/api_client.dart';
-
+import '../screens/note_edit_screen.dart';
 import '../database/database_helper.dart';
 import '../models/schedule_response.dart';
 import '../models/lesson.dart';
@@ -188,6 +188,26 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     }
   }
 
+  Future<void> _openCreateNote(Lesson lesson) async {
+    final created = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NoteEditScreen(
+          lessonId: lesson.id == 0 ? null : lesson.id,
+          initialSubject: lesson.subject,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (created == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Заметка сохранена')),
+      );
+    }
+  }
+
 
   // ---------- UI ----------
 
@@ -244,8 +264,9 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
                     lesson: lessons[index],
                     number: index + 1,
                     typeColor: _typeColor(lessons[index].typeLesson),
-                    slots: slots, // если ты уже перешёл на time_slot
-                    scheduleType: _scheduleType, // ✅ добавь
+                    slots: slots,
+                    scheduleType: _scheduleType,
+                    onTap: () => _openCreateNote(lessons[index]),
                   );
 
                 },
@@ -379,9 +400,8 @@ class LessonCard extends StatelessWidget {
   final int number;
   final Color typeColor;
   final ScheduleType scheduleType;
-
-  // если используешь time_slot из БД:
   final Map<int, ({String start, String end})>? slots;
+  final VoidCallback? onTap;
 
   const LessonCard({
     super.key,
@@ -390,6 +410,7 @@ class LessonCard extends StatelessWidget {
     required this.typeColor,
     required this.scheduleType,
     this.slots,
+    this.onTap,
   });
 
   @override
@@ -402,7 +423,6 @@ class LessonCard extends StatelessWidget {
       start = slot?.start ?? '--:--';
       end = slot?.end ?? '--:--';
     } else {
-      // fallback (если ещё не подключал time_slot)
       const timeSlots = {
         1: ('08:00', '09:30'),
         2: ('09:50', '11:20'),
@@ -417,77 +437,91 @@ class LessonCard extends StatelessWidget {
       end = slot?.$2 ?? '--:--';
     }
 
-    // ✅ что показывать:
     final showTeacher = scheduleType != ScheduleType.teacher;
     final showAuditory = scheduleType != ScheduleType.auditory;
     final showGroups = scheduleType != ScheduleType.group;
-
     final groupsText = lesson.group.isEmpty ? '' : lesson.group.join(', ');
 
     return Material(
       elevation: 1.2,
       borderRadius: BorderRadius.circular(16),
       color: Colors.white,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.black26),
-              ),
-              child: Center(
-                child: Text(
-                  '$start\n-\n$end',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black26),
+                ),
+                child: Center(
+                  child: Text(
+                    '$start\n-\n$end',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    lesson.subject,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    lesson.typeLesson,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: typeColor,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      lesson.subject,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-
-                  if (showGroups && groupsText.isNotEmpty) ...[
-                    Text('Группы: $groupsText', style: const TextStyle(fontSize: 14)),
                     const SizedBox(height: 2),
+                    Text(
+                      lesson.typeLesson,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: typeColor,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (showGroups && groupsText.isNotEmpty) ...[
+                      Text(
+                        'Группы: $groupsText',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
+                    if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
+                      Text(
+                        lesson.teacher,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
+                    if (showAuditory && lesson.auditory.trim().isNotEmpty)
+                      Text(
+                        'Аудитория: ${lesson.auditory}',
+                        style: const TextStyle(fontSize: 14),
+                      ),
                   ],
-
-                  if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
-                    Text(lesson.teacher, style: const TextStyle(fontSize: 14)),
-                    const SizedBox(height: 2),
-                  ],
-
-                  if (showAuditory && lesson.auditory.trim().isNotEmpty)
-                    Text('Аудитория: ${lesson.auditory}', style: const TextStyle(fontSize: 14)),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              '№$number',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Text(
+                '№$number',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

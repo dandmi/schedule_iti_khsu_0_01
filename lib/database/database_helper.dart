@@ -35,7 +35,7 @@ class DatabaseHelper {
       debugPrint('📁 Путь к БД: $path');
       final db = await openDatabase(
         path,
-        version: 2,
+        version: 3,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
@@ -89,15 +89,17 @@ class DatabaseHelper {
 
     // 4. Заметки
     await db.execute('''
-      CREATE TABLE note (
-        note_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT,
-        description TEXT,
-        created_at INTEGER NOT NULL,      -- timestamp
-        lesson_id INTEGER,
-        FOREIGN KEY (lesson_id) REFERENCES lesson (lesson_id) ON DELETE CASCADE
-      )
-    ''');
+    CREATE TABLE note (
+      note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      description TEXT,
+      subject TEXT,
+      created_at INTEGER NOT NULL,
+      due_at INTEGER,
+      lesson_id INTEGER,
+    FOREIGN KEY (lesson_id) REFERENCES lesson (lesson_id) ON DELETE CASCADE
+  )
+''');
   }
 
   Future<void> _insertDefaultTimeSlots(Database db) async {
@@ -122,11 +124,29 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Пример: если oldVersion < 2 — добавить таблицу favorite и изменить lesson
     if (oldVersion < 2) {
-      // Здесь можно реализовать миграцию от старой схемы
-      // Но для MVP проще удалить и создать заново (если данные не критичны)
-      // Или оставить как есть — у тебя первая версия
+      // старых миграций пока нет
+    }
+
+    if (oldVersion < 3) {
+      await _addColumnIfMissing(db, 'note', 'subject', 'TEXT');
+      await _addColumnIfMissing(db, 'note', 'due_at', 'INTEGER');
+    }
+  }
+
+  Future<void> _addColumnIfMissing(
+      Database db,
+      String tableName,
+      String columnName,
+      String columnType,
+      ) async {
+    final info = await db.rawQuery('PRAGMA table_info($tableName)');
+    final exists = info.any((row) => row['name'] == columnName);
+
+    if (!exists) {
+      await db.execute(
+        'ALTER TABLE $tableName ADD COLUMN $columnName $columnType',
+      );
     }
   }
 
@@ -243,61 +263,74 @@ class DatabaseHelper {
   // ===== NOTES =====
 
 
-// Получить все заметки
   Future<List<Note>> getNotes() async {
     final db = await database;
-    final maps = await db.query(
-      'note', // ✅ важно: именно 'note'
-      orderBy: 'created_at DESC',
-    );
+
+    final maps = await db.rawQuery('''
+    SELECT *
+    FROM note
+    ORDER BY
+      CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+      due_at ASC,
+      created_at DESC
+  ''');
+
     return maps.map((e) => Note.fromMap(e)).toList();
   }
 
-// Добавить заметку
   Future<int> addNote({
     String? title,
     String? description,
+    String? subject,
+    int? dueAt,
     int? lessonId,
   }) async {
     final db = await database;
+
     return db.insert(
       'note',
       {
         'title': title,
         'description': description,
-        'created_at': DateTime.now().millisecondsSinceEpoch, // ✅ обязательно
+        'subject': subject,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'due_at': dueAt,
         'lesson_id': lessonId,
       },
       conflictAlgorithm: ConflictAlgorithm.abort,
     );
   }
 
-// Обновить заметку
   Future<int> updateNote({
     required int noteId,
     String? title,
     String? description,
+    String? subject,
+    int? dueAt,
     int? lessonId,
   }) async {
     final db = await database;
+
     return db.update(
       'note',
       {
         'title': title,
         'description': description,
+        'subject': subject,
+        'due_at': dueAt,
         'lesson_id': lessonId,
       },
-      where: 'note_id = ?', // ✅ важно: note_id
+      where: 'note_id = ?',
       whereArgs: [noteId],
     );
   }
 
-// Удалить заметку
   Future<int> deleteNote(int noteId) async {
     final db = await database;
+
     return db.delete(
       'note',
-      where: 'note_id = ?', // ✅ важно: note_id
+      where: 'note_id = ?',
       whereArgs: [noteId],
     );
   }
