@@ -242,24 +242,42 @@ class DatabaseHelper {
 
   // ===== NOTES =====
 
+
+// Получить все заметки
+  Future<List<Note>> getNotes() async {
+    final db = await database;
+    final maps = await db.query(
+      'note', // ✅ важно: именно 'note'
+      orderBy: 'created_at DESC',
+    );
+    return maps.map((e) => Note.fromMap(e)).toList();
+  }
+
+// Добавить заметку
   Future<int> addNote({
     String? title,
     String? description,
     int? lessonId,
   }) async {
     final db = await database;
-    return db.insert('note', {
-      'title': title,
-      'description': description,
-      'created_at': DateTime.now().millisecondsSinceEpoch,
-      'lesson_id': lessonId,
-    });
+    return db.insert(
+      'note',
+      {
+        'title': title,
+        'description': description,
+        'created_at': DateTime.now().millisecondsSinceEpoch, // ✅ обязательно
+        'lesson_id': lessonId,
+      },
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
   }
 
+// Обновить заметку
   Future<int> updateNote({
     required int noteId,
     String? title,
     String? description,
+    int? lessonId,
   }) async {
     final db = await database;
     return db.update(
@@ -267,38 +285,23 @@ class DatabaseHelper {
       {
         'title': title,
         'description': description,
+        'lesson_id': lessonId,
       },
-      where: 'note_id = ?',
+      where: 'note_id = ?', // ✅ важно: note_id
       whereArgs: [noteId],
     );
   }
 
+// Удалить заметку
   Future<int> deleteNote(int noteId) async {
     final db = await database;
-    return db.delete('note', where: 'note_id = ?', whereArgs: [noteId]);
-  }
-
-  Future<List<Note>> getNotes({int? lessonId}) async {
-    final db = await database;
-    final maps = await db.query(
+    return db.delete(
       'note',
-      where: lessonId != null ? 'lesson_id = ?' : null,
-      whereArgs: lessonId != null ? [lessonId] : null,
-      orderBy: 'created_at DESC',
-    );
-    return maps.map((e) => Note.fromMap(e)).toList();
-  }
-
-  Future<Note?> getNoteById(int noteId) async {
-    final db = await database;
-    final maps = await db.query(
-      'note',
-      where: 'note_id = ?',
+      where: 'note_id = ?', // ✅ важно: note_id
       whereArgs: [noteId],
-      limit: 1,
     );
-    if (maps.isEmpty) return null;
-    return Note.fromMap(maps.first);
   }
+
+
 
 }

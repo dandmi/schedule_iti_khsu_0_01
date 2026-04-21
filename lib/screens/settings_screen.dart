@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../database/database_helper.dart';
 import '../models/favorite_item.dart';
+import '../models/schedule_target.dart';
 import '../screens/add_favorite_screen.dart';
+import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -17,7 +17,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _db = DatabaseHelper();
-
   late Future<List<FavoriteItem>> _favoritesFuture;
 
   String? _activeType;
@@ -26,7 +25,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _scrollCtrl = ScrollController();
   bool _canScrollLeft = false;
   bool _canScrollRight = false;
-
 
   @override
   void initState() {
@@ -44,12 +42,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadActive() async {
-    final prefs = await SharedPreferences.getInstance();
+    final target = await CurrentScheduleStorage.load();
+
     if (!mounted) return;
 
     setState(() {
-      _activeType = prefs.getString('last_favorite_type');
-      _activeValue = prefs.getString('last_favorite_value');
+      _activeType = target?.type.name;
+      _activeValue = target?.value;
     });
   }
 
@@ -68,13 +67,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-
   void _refreshFavorites() {
     setState(() {
       _favoritesFuture = _db.getFavorites();
     });
+    _loadActive();
   }
-
 
   Future<void> _confirmDelete(FavoriteItem item) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -128,29 +126,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (ok != true) return;
 
-    // Узнаём, было ли это активное избранное
-    final prefs = await SharedPreferences.getInstance();
-    final activeType = prefs.getString('last_favorite_type');
-    final activeValue = prefs.getString('last_favorite_value');
-    final isActive = (activeType == item.type && activeValue == item.name);
-
-    // Удаляем из БД
     await _db.removeFavorite(item.id);
 
     if (!mounted) return;
-
-    // Если удалили активное — очищаем prefs, чтобы расписание стало "выберите..."
-    if (isActive) {
-      await prefs.remove('last_favorite_type');
-      await prefs.remove('last_favorite_value');
-
-      setState(() {
-        _activeType = null;
-        _activeValue = null;
-      });
-
-      widget.onScheduleChanged?.call();
-    }
 
     _refreshFavorites();
 
@@ -158,8 +136,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       SnackBar(content: Text('Удалено: ${item.name}')),
     );
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -194,8 +170,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onPressed: () async {
                         final added = await Navigator.push<bool>(
                           context,
-                          MaterialPageRoute(builder: (_) => const AddFavoriteScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const AddFavoriteScreen(),
+                          ),
                         );
+
                         if (!mounted) return;
                         if (added == true) _refreshFavorites();
                       },
@@ -206,8 +185,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               }
 
-              // после первой отрисовки корректно обновим подсказки скролла
-              WidgetsBinding.instance.addPostFrameCallback((_) => _updateScrollHints());
+              WidgetsBinding.instance
+                  .addPostFrameCallback((_) => _updateScrollHints());
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -222,16 +201,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           physics: const BouncingScrollPhysics(),
                           padding: const EdgeInsets.only(right: 8),
                           itemCount: favorites.length + 1,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          separatorBuilder: (_, __) =>
+                          const SizedBox(width: 8),
                           itemBuilder: (context, index) {
                             if (index == favorites.length) {
-                              // кнопка "добавить" как чип
                               return _AddChip(
                                 onTap: () async {
                                   final added = await Navigator.push<bool>(
                                     context,
-                                    MaterialPageRoute(builder: (_) => const AddFavoriteScreen()),
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                      const AddFavoriteScreen(),
+                                    ),
                                   );
+
                                   if (!mounted) return;
                                   if (added == true) _refreshFavorites();
                                 },
@@ -239,40 +222,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             }
 
                             final item = favorites[index];
-                            final isActive =
-                                _activeType == item.scheduleType.name && _activeValue == item.name;
+                            final isActive = _activeType ==
+                                item.scheduleType.name &&
+                                _activeValue == item.name;
 
                             return _FavoriteChip(
                               item: item,
                               isActive: isActive,
-                                onTap: () async {
-                                  final messenger = ScaffoldMessenger.of(context);
+                              onTap: () async {
+                                final messenger =
+                                ScaffoldMessenger.of(context);
 
-                                  final prefs = await SharedPreferences.getInstance();
-                                  await prefs.setString('last_favorite_type', item.scheduleType.name);
-                                  await prefs.setString('last_favorite_value', item.name);
+                                final target = ScheduleTarget(
+                                  type: item.scheduleType,
+                                  value: item.name,
+                                );
 
-                                  if (!mounted) return;
+                                await CurrentScheduleStorage.save(target);
 
-                                  setState(() {
-                                    _activeType = item.scheduleType.name;
-                                    _activeValue = item.name;
-                                  });
+                                if (!mounted) return;
 
-                                  messenger.showSnackBar(
-                                    SnackBar(content: Text('Выбрано: ${item.name}')),
-                                  );
+                                setState(() {
+                                  _activeType = item.scheduleType.name;
+                                  _activeValue = item.name;
+                                });
 
-                                  widget.onScheduleChanged?.call();
-                                },
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Выбрано: ${item.name}'),
+                                  ),
+                                );
 
-                                onLongPress: () => _confirmDelete(item),
-
+                                widget.onScheduleChanged?.call();
+                              },
+                              onLongPress: () => _confirmDelete(item),
                             );
                           },
                         ),
-
-                        // подсказка "есть ещё слева"
                         if (_canScrollLeft)
                           Positioned(
                             left: 0,
@@ -282,8 +268,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               child: _EdgeHint(direction: AxisDirection.left),
                             ),
                           ),
-
-                        // подсказка "есть ещё справа"
                         if (_canScrollRight)
                           Positioned(
                             right: 0,
@@ -296,7 +280,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 8),
                   if (favorites.isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -307,19 +290,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ],
-
                 ],
               );
             },
           ),
-
         ],
       ),
     );
   }
-
 }
-
 
 class _FavoriteChip extends StatelessWidget {
   final FavoriteItem item;
@@ -342,7 +321,10 @@ class _FavoriteChip extends StatelessWidget {
         ? Icons.person
         : Icons.location_on;
 
-    final bg = isActive ? Colors.green.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.12);
+    final bg = isActive
+        ? Colors.green.withValues(alpha: 0.15)
+        : Colors.grey.withValues(alpha: 0.12);
+
     final border = isActive ? Colors.green : Colors.transparent;
 
     return InkWell(
@@ -377,9 +359,7 @@ class _FavoriteChip extends StatelessWidget {
               const Icon(Icons.check_circle, size: 16, color: Colors.green),
             ],
           ],
-
         ),
-
       ),
     );
   }
@@ -398,7 +378,7 @@ class _AddChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.grey.withValues(alpha:0.12),
+          color: Colors.grey.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(999),
         ),
         child: const Row(
@@ -445,4 +425,3 @@ class _EdgeHint extends StatelessWidget {
     );
   }
 }
-

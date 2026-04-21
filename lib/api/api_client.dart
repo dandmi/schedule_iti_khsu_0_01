@@ -36,7 +36,7 @@ class SearchResponse {
 // ==========================
 
 class ApiClient {
-  static const String baseUrl = 'https://t2iti.khsu.ru/api';
+  static const String baseUrl = 'https://t2.iti-khsu.ru/api';
 
   String _formatDate(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');

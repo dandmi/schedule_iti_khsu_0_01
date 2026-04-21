@@ -13,32 +13,26 @@ class NotesScreen extends StatefulWidget {
 
 class NotesScreenState extends State<NotesScreen> {
   final _db = DatabaseHelper();
-  late Future<List<Note>> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _db.getNotes();
-  }
 
   void _reload() {
-    setState(() => _future = _db.getNotes());
+    if (!mounted) return;
+    setState(() {}); // ✅ просто перерисовать -> FutureBuilder заново вызовет getNotes()
   }
 
   Future<void> _openCreate() async {
-    final changed = await Navigator.push<bool>(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const NoteEditScreen()),
     );
-    if (changed == true) _reload();
+    _reload();
   }
 
   Future<void> _openEdit(Note note) async {
-    final changed = await Navigator.push<bool>(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => NoteEditScreen(note: note)),
     );
-    if (changed == true) _reload();
+    _reload();
   }
 
   Future<void> _delete(Note note) async {
@@ -47,13 +41,13 @@ class NotesScreenState extends State<NotesScreen> {
     _reload();
   }
 
-  // ← HomeScreen будет дергать этот метод для FAB
+  // Если HomeScreen дергает этот метод для FAB — он остаётся
   Future<void> openCreate() async => _openCreate();
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Note>>(
-      future: _future,
+      future: _db.getNotes(), // ✅ новый Future при каждом build
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
