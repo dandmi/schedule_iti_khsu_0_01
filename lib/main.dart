@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
+import 'utils/local_notification_service.dart';
 import 'utils/theme_storage.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await LocalNotificationService.instance.initialize();
+  await LocalNotificationService.instance.requestPermissions();
+  await LocalNotificationService.instance.rescheduleAll();
+
   runApp(const MyApp());
 }
 

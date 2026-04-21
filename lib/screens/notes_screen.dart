@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/note.dart';
 import 'note_edit_screen.dart';
+import '../utils/local_notification_service.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -45,7 +46,9 @@ class NotesScreenState extends State<NotesScreen> {
 
   Future<void> _delete(Note note) async {
     if (note.id == null) return;
+
     await _db.deleteNote(note.id!);
+    await LocalNotificationService.instance.rescheduleAll();
     _reload();
   }
 

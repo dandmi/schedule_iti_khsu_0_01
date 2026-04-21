@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/note.dart';
+import '../utils/local_notification_service.dart';
 
 class NoteEditScreen extends StatefulWidget {
   final Note? note;
@@ -117,6 +118,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         lessonId: widget.lessonId,
       );
     }
+    await LocalNotificationService.instance.rescheduleAll();
 
     if (!mounted) return;
     Navigator.pop(context, true);

@@ -9,6 +9,7 @@ import '../models/favorite_item.dart';
 import 'package:synchronized/synchronized.dart';
 
 import '../models/note.dart';
+import '../models/upcoming_lesson_reminder.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -32,17 +33,17 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     try {
       final String path = join(await getDatabasesPath(), 'schedule.db');
-      debugPrint('📁 Путь к БД: $path');
+      debugPrint('Путь к БД: $path');
       final db = await openDatabase(
         path,
         version: 3,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
-      debugPrint('✅ БД открыта успешно');
+      debugPrint('БД открыта успешно');
       return db;
     } catch (e, stack) {
-      debugPrint('❌ Ошибка инициализации БД: $e\n$stack');
+      debugPrint('Ошибка инициализации БД: $e\n$stack');
       rethrow;
     }
   }
@@ -333,6 +334,57 @@ class DatabaseHelper {
       where: 'note_id = ?',
       whereArgs: [noteId],
     );
+  }
+
+
+  Future<List<Note>> getNotesWithDueAt() async {
+    final db = await database;
+
+    final maps = await db.query(
+      'note',
+      where: 'due_at IS NOT NULL',
+      orderBy: 'due_at ASC',
+    );
+
+    return maps.map((e) => Note.fromMap(e)).toList();
+  }
+
+  Future<List<UpcomingLessonReminder>> getUpcomingLessonsForTarget({
+    required String targetType,
+    required String targetValue,
+    String? fromDate,
+  }) async {
+    final db = await database;
+
+    final whereBuffer = StringBuffer(
+      'l.target_type = ? AND l.target_value = ?',
+    );
+
+    final args = <Object?>[targetType, targetValue];
+
+    if (fromDate != null) {
+      whereBuffer.write(' AND date(l.date) >= date(?)');
+      args.add(fromDate);
+    }
+
+    final maps = await db.rawQuery('''
+    SELECT
+      l.lesson_id,
+      l.subject,
+      l.teacher,
+      l.auditory,
+      l.groups_json,
+      l.date,
+      t.start_time,
+      l.target_type,
+      l.target_value
+    FROM lesson l
+    INNER JOIN time_slot t ON t.slot_id = l.slot_id
+    WHERE ${whereBuffer.toString()}
+    ORDER BY l.date ASC, l.slot_id ASC
+  ''', args);
+
+    return maps.map((e) => UpcomingLessonReminder.fromMap(e)).toList();
   }
 
 

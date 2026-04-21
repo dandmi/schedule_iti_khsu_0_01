@@ -5,6 +5,8 @@ import '../models/schedule_target.dart';
 import '../screens/add_favorite_screen.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
+import 'notification_settings_screen.dart';
+
 
 class SettingsScreen extends StatefulWidget {
   final ThemeMode themeMode;
@@ -209,6 +211,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 24),
+
+
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: ListTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('Настройки уведомлений'),
+              subtitle: const Text('До занятия и до срока в заметках'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationSettingsScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+
 
           const Text(
             'Избранные расписания',

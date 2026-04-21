@@ -7,6 +7,7 @@ import '../models/lesson.dart';
 import '../utils/schedule_type.dart';
 import '../models/schedule_target.dart';
 import '../utils/current_schedule_storage.dart';
+import '../utils/local_notification_service.dart';
 
 class ScheduleExplorerView extends StatefulWidget {
   final ScheduleType initialType;
@@ -132,6 +133,8 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       ),
     );
 
+    await LocalNotificationService.instance.rescheduleAll();
+
     if (!mounted) return;
 
     setState(() {
@@ -207,7 +210,7 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       targetType: targetType,
       targetValue: targetValue,
     );
-
+    await LocalNotificationService.instance.rescheduleAll();
     return response;
   }
 
