@@ -7,9 +7,16 @@ import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
 
 class SettingsScreen extends StatefulWidget {
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
   final VoidCallback? onScheduleChanged;
 
-  const SettingsScreen({super.key, this.onScheduleChanged});
+  const SettingsScreen({
+    super.key,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+    this.onScheduleChanged,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -72,6 +79,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _favoritesFuture = _db.getFavorites();
     });
     _loadActive();
+  }
+
+  String _themeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.dark:
+        return 'Тёмная';
+      case ThemeMode.light:
+        return 'Светлая';
+      case ThemeMode.system:
+        return 'Системная';
+    }
   }
 
   Future<void> _confirmDelete(FavoriteItem item) async {
@@ -144,6 +162,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            'Оформление',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Цветовая схема',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Светлая'),
+                      selected: widget.themeMode == ThemeMode.light,
+                      onSelected: (_) => widget.onThemeModeChanged(ThemeMode.light),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Тёмная'),
+                      selected: widget.themeMode == ThemeMode.dark,
+                      onSelected: (_) => widget.onThemeModeChanged(ThemeMode.dark),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Текущая тема: ${_themeLabel(widget.themeMode)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
           const Text(
             'Избранные расписания',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),

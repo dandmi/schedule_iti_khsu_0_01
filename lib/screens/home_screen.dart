@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
-
 import '../widgets/main_layout.dart';
 import 'schedule_screen.dart';
 import 'notes_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
+
+  const HomeScreen({
+    super.key,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -18,19 +24,38 @@ class _HomeScreenState extends State<HomeScreen> {
   final _notesKey = GlobalKey<NotesScreenState>();
   final _scheduleKey = GlobalKey<ScheduleScreenState>();
 
-  late final List<Widget> _pages = [
-    ScheduleScreen(key: _scheduleKey),
-    NotesScreen(key: _notesKey),
-    SettingsScreen(
-      onScheduleChanged: () {
-        // после выбора расписания обновляем ScheduleScreen
-        _scheduleKey.currentState?.reload();
+  late List<Widget> _pages;
 
-        // и переключаем пользователя на вкладку "Расписание"
-        setState(() => _index = 0);
-      },
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _buildPages();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.themeMode != widget.themeMode ||
+        oldWidget.onThemeModeChanged != widget.onThemeModeChanged) {
+      _buildPages();
+    }
+  }
+
+  void _buildPages() {
+    _pages = [
+      ScheduleScreen(key: _scheduleKey),
+      NotesScreen(key: _notesKey),
+      SettingsScreen(
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
+        onScheduleChanged: () {
+          _scheduleKey.currentState?.reload();
+          setState(() => _index = 0);
+        },
+      ),
+    ];
+  }
 
   void _onTab(int i) {
     setState(() => _index = i);
