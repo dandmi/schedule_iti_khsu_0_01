@@ -91,22 +91,25 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     ScheduleType.auditory => Icons.location_on,
   };
 
-  Color _typeColor(String typeLesson) {
+  Color _typeColor(BuildContext context, String typeLesson) {
     final t = typeLesson.toLowerCase().trim();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
 
-    // зачеты/экзамены
-    if (t.contains('зач') || t.contains('экз')) return Colors.red;
+    if (t.contains('зач') || t.contains('экз')) {
+      return isDark ? Colors.red.shade300 : Colors.red.shade700;
+    }
+    if (t.contains('лаб')) {
+      return isDark ? Colors.orange.shade300 : Colors.orange.shade800;
+    }
+    if (t.contains('пр')) {
+      return isDark ? Colors.amber.shade300 : Colors.amber.shade800;
+    }
+    if (t.contains('л')) {
+      return isDark ? Colors.green.shade300 : Colors.green.shade700;
+    }
 
-    // лабораторные
-    if (t.contains('лаб')) return Colors.orange;
-
-    // практика
-    if (t.contains('пр')) return Colors.yellow.shade700;
-
-    // лекция
-    if (t.contains('л')) return Colors.green;
-
-    return Colors.black54;
+    return scheme.onSurfaceVariant;
   }
 
 
@@ -362,8 +365,13 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
                   final slots = day.slots;
 
                   if (lessons.isEmpty) {
-                    return const Center(
-                      child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
+                    final scheme = Theme.of(context).colorScheme;
+
+                    return Center(
+                      child: Text(
+                        'Нет занятий',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
                     );
                   }
 
@@ -377,7 +385,7 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
                       return LessonCard(
                         lesson: lesson,
                         number: index + 1,
-                        typeColor: _typeColor(lesson.typeLesson),
+                        typeColor: _typeColor(context, lesson.typeLesson),
                         slots: slots,
                         scheduleType: _scheduleType,
                         onTap: () => _openCreateNote(lesson),
@@ -417,8 +425,15 @@ class ScheduleTopHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final brightness = Theme.of(context).brightness;
+    final headerBg = scheme.primaryContainer;
+    final headerFg = scheme.onPrimaryContainer;
+    final pillBg = headerFg.withValues(alpha: brightness == Brightness.dark ? 0.14 : 0.08);
+    final pillBorder = headerFg.withValues(alpha: brightness == Brightness.dark ? 0.18 : 0.10);
+
     return Material(
-      color: Colors.green,
+      color: headerBg,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -432,28 +447,29 @@ class ScheduleTopHeader extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
+                      color: pillBg,
                       borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: pillBorder),
                     ),
                     child: Row(
                       children: [
-                        Icon(icon, color: Colors.black87),
+                        Icon(icon, color: headerFg),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: Colors.black87,
+                              color: headerFg,
                             ),
                           ),
                         ),
                         if (showDropdownChevron) ...[
                           const SizedBox(width: 8),
-                          const Icon(Icons.arrow_drop_down, color: Colors.black87),
+                          Icon(Icons.arrow_drop_down, color: headerFg),
                         ],
                       ],
                     ),
@@ -464,7 +480,7 @@ class ScheduleTopHeader extends StatelessWidget {
               IconButton(
                 tooltip: 'Обновить',
                 onPressed: onRefresh,
-                icon: const Icon(Icons.refresh, color: Colors.black87),
+                icon: Icon(Icons.refresh, color: headerFg),
               ),
             ],
           ),
@@ -487,25 +503,51 @@ class _DatePager extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Material(
-      color: Colors.white,
+      color: scheme.surface,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: Color(0xFFE6E6E6))),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: scheme.outlineVariant),
+          ),
         ),
         child: Row(
           children: [
-            IconButton(onPressed: onPrev, icon: const Icon(Icons.chevron_left)),
+            Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: IconButton(
+                onPressed: onPrev,
+                icon: const Icon(Icons.chevron_left),
+              ),
+            ),
             Expanded(
               child: Center(
                 child: Text(
                   dateText,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
                 ),
               ),
             ),
-            IconButton(onPressed: onNext, icon: const Icon(Icons.chevron_right)),
+            Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: IconButton(
+                onPressed: onNext,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ),
           ],
         ),
       ),
@@ -539,6 +581,8 @@ class LessonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     String start = '--:--';
     String end = '--:--';
 
@@ -566,14 +610,19 @@ class LessonCard extends StatelessWidget {
     final showGroups = scheduleType != ScheduleType.group;
 
     return Material(
-      elevation: 1.2,
+      color: scheme.surface,
+      elevation: 0.6,
+      surfaceTintColor: scheme.primary,
       borderRadius: BorderRadius.circular(16),
-      color: Colors.white,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -582,13 +631,17 @@ class LessonCard extends StatelessWidget {
                 height: 72,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.black26),
+                  color: scheme.surfaceContainerHighest,
+                  border: Border.all(color: scheme.outlineVariant),
                 ),
                 child: Center(
                   child: Text(
                     '$start\n-\n$end',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -599,9 +652,10 @@ class LessonCard extends StatelessWidget {
                   children: [
                     Text(
                       lesson.subject,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -614,16 +668,18 @@ class LessonCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-
                     if (showGroups && lesson.group.isNotEmpty) ...[
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             'Группы:',
-                            style: TextStyle(fontSize: 14),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
                           ...lesson.group.map(
                                 (group) => _LessonLinkText(
@@ -635,16 +691,18 @@ class LessonCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                     ],
-
                     if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             'Преподаватель:',
-                            style: TextStyle(fontSize: 14),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
                           _LessonLinkText(
                             text: lesson.teacher.trim(),
@@ -654,16 +712,18 @@ class LessonCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                     ],
-
                     if (showAuditory && lesson.auditory.trim().isNotEmpty)
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          const Text(
+                          Text(
                             'Аудитория:',
-                            style: TextStyle(fontSize: 14),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
                           _LessonLinkText(
                             text: lesson.auditory.trim(),
@@ -677,9 +737,10 @@ class LessonCard extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 '№$number',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -702,20 +763,22 @@ class _LessonLinkText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.06),
+          color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
           text,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: Colors.black87,
+            color: scheme.onSurface,
             fontWeight: FontWeight.w500,
           ),
         ),
