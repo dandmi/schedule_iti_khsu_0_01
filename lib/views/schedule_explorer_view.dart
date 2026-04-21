@@ -5,6 +5,8 @@ import '../database/database_helper.dart';
 import '../models/schedule_response.dart';
 import '../models/lesson.dart';
 import '../utils/schedule_type.dart';
+import '../models/schedule_target.dart';
+import '../utils/current_schedule_storage.dart';
 
 class ScheduleExplorerView extends StatefulWidget {
   final ScheduleType initialType;
@@ -208,6 +210,62 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     }
   }
 
+  void _handleHorizontalDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+
+    if (velocity.abs() < 250) return;
+
+    if (velocity < 0) {
+      _changeDate(1);   // свайп влево -> следующий день
+    } else {
+      _changeDate(-1);  // свайп вправо -> предыдущий день
+    }
+  }
+
+  Future<void> _openScheduleTarget({
+    required ScheduleType type,
+    required String value,
+  }) async {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+
+    final target = ScheduleTarget(
+      type: type,
+      value: trimmed,
+    );
+
+    await CurrentScheduleStorage.save(target);
+
+    if (!mounted) return;
+
+    setState(() {
+      _scheduleType = type;
+      _selectedItem = trimmed;
+      _dayFuture = null;
+    });
+  }
+
+  Future<void> _openTeacherSchedule(String teacher) async {
+    await _openScheduleTarget(
+      type: ScheduleType.teacher,
+      value: teacher,
+    );
+  }
+
+  Future<void> _openAuditorySchedule(String auditory) async {
+    await _openScheduleTarget(
+      type: ScheduleType.auditory,
+      value: auditory,
+    );
+  }
+
+  Future<void> _openGroupSchedule(String group) async {
+    await _openScheduleTarget(
+      type: ScheduleType.group,
+      value: group,
+    );
+  }
+
 
   // ---------- UI ----------
 
@@ -234,44 +292,52 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
         ),
 
         Expanded(
-          child: FutureBuilder<_DayData>(
-            future: _getDayFuture(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Ошибка: ${snapshot.error}'));
-              }
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: _handleHorizontalDragEnd,
+            child: FutureBuilder<_DayData>(
+              future: _getDayFuture(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-              final day = snapshot.data!;
-              final lessons = day.schedule.lessons;
-              final slots = day.slots;
+                if (snapshot.hasError) {
+                  return Center(child: Text('Ошибка: ${snapshot.error}'));
+                }
 
+                final day = snapshot.data!;
+                final lessons = day.schedule.lessons;
+                final slots = day.slots;
 
-              if (lessons.isEmpty) {
-                return const Center(
-                  child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
-                );
-              }
-
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                itemCount: lessons.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  return LessonCard(
-                    lesson: lessons[index],
-                    number: index + 1,
-                    typeColor: _typeColor(lessons[index].typeLesson),
-                    slots: slots,
-                    scheduleType: _scheduleType,
-                    onTap: () => _openCreateNote(lessons[index]),
+                if (lessons.isEmpty) {
+                  return const Center(
+                    child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
                   );
+                }
 
-                },
-              );
-            },
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  itemCount: lessons.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final lesson = lessons[index];
+
+                    return LessonCard(
+                      lesson: lesson,
+                      number: index + 1,
+                      typeColor: _typeColor(lesson.typeLesson),
+                      slots: slots,
+                      scheduleType: _scheduleType,
+                      onTap: () => _openCreateNote(lesson),
+                      onTeacherTap: (value) => _openTeacherSchedule(value),
+                      onAuditoryTap: (value) => _openAuditorySchedule(value),
+                      onGroupTap: (value) => _openGroupSchedule(value),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -402,6 +468,9 @@ class LessonCard extends StatelessWidget {
   final ScheduleType scheduleType;
   final Map<int, ({String start, String end})>? slots;
   final VoidCallback? onTap;
+  final ValueChanged<String>? onTeacherTap;
+  final ValueChanged<String>? onAuditoryTap;
+  final ValueChanged<String>? onGroupTap;
 
   const LessonCard({
     super.key,
@@ -411,6 +480,9 @@ class LessonCard extends StatelessWidget {
     required this.scheduleType,
     this.slots,
     this.onTap,
+    this.onTeacherTap,
+    this.onAuditoryTap,
+    this.onGroupTap,
   });
 
   @override
@@ -440,7 +512,6 @@ class LessonCard extends StatelessWidget {
     final showTeacher = scheduleType != ScheduleType.teacher;
     final showAuditory = scheduleType != ScheduleType.auditory;
     final showGroups = scheduleType != ScheduleType.group;
-    final groupsText = lesson.group.isEmpty ? '' : lesson.group.join(', ');
 
     return Material(
       elevation: 1.2,
@@ -452,6 +523,7 @@ class LessonCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 72,
@@ -489,25 +561,63 @@ class LessonCard extends StatelessWidget {
                         color: typeColor,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    if (showGroups && groupsText.isNotEmpty) ...[
-                      Text(
-                        'Группы: $groupsText',
-                        style: const TextStyle(fontSize: 14),
+                    const SizedBox(height: 8),
+
+                    if (showGroups && lesson.group.isNotEmpty) ...[
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            'Группы:',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          ...lesson.group.map(
+                                (group) => _LessonLinkText(
+                              text: group,
+                              onTap: () => onGroupTap?.call(group),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 4),
                     ],
+
                     if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
-                      Text(
-                        lesson.teacher,
-                        style: const TextStyle(fontSize: 14),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            'Преподаватель:',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          _LessonLinkText(
+                            text: lesson.teacher.trim(),
+                            onTap: () => onTeacherTap?.call(lesson.teacher.trim()),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 4),
                     ],
+
                     if (showAuditory && lesson.auditory.trim().isNotEmpty)
-                      Text(
-                        'Аудитория: ${lesson.auditory}',
-                        style: const TextStyle(fontSize: 14),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text(
+                            'Аудитория:',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          _LessonLinkText(
+                            text: lesson.auditory.trim(),
+                            onTap: () => onAuditoryTap?.call(lesson.auditory.trim()),
+                          ),
+                        ],
                       ),
                   ],
                 ),
@@ -521,6 +631,37 @@ class LessonCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _LessonLinkText extends StatelessWidget {
+  final String text;
+  final VoidCallback onTap;
+
+  const _LessonLinkText({
+    required this.text,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Colors.blue,
+            decoration: TextDecoration.underline,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),

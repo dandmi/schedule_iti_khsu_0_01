@@ -32,7 +32,15 @@ class _HomeScreenState extends State<HomeScreen> {
     ),
   ];
 
-  void _onTab(int i) => setState(() => _index = i);
+  void _onTab(int i) {
+    setState(() => _index = i);
+
+    if (i == 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _notesKey.currentState?.reload();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

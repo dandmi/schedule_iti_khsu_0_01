@@ -18,6 +18,8 @@ class NotesScreenState extends State<NotesScreen> {
     setState(() {});
   }
 
+  Future<void> reload() async => _reload();
+
   String _two(int value) => value.toString().padLeft(2, '0');
 
   String _formatDateTime(int millis) {
