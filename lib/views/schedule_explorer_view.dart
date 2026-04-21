@@ -30,6 +30,18 @@ class _DayData {
   _DayData(this.schedule, this.slots);
 }
 
+class _ScheduleNavigationEntry {
+  final ScheduleType type;
+  final String value;
+  final DateTime date;
+
+  const _ScheduleNavigationEntry({
+    required this.type,
+    required this.value,
+    required this.date,
+  });
+}
+
 
 class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   final ApiClient _apiClient = ApiClient();
@@ -38,8 +50,8 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   late ScheduleType _scheduleType;
   late String _selectedItem;
   DateTime _selectedDate = DateTime.now();
-
   Future<_DayData>? _dayFuture;
+  final List<_ScheduleNavigationEntry> _history = [];
 
 
   @override
@@ -59,7 +71,9 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
         widget.isFavorite != oldWidget.isFavorite) {
       _scheduleType = widget.initialType;
       _selectedItem = widget.initialValue;
+      _selectedDate = DateTime.now();
       _dayFuture = null;
+      _history.clear();
     }
   }
 
@@ -99,6 +113,28 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   void _changeDate(int deltaDays) {
     setState(() {
       _selectedDate = _selectedDate.add(Duration(days: deltaDays));
+      _dayFuture = null;
+    });
+  }
+
+  Future<void> _popScheduleHistory() async {
+    if (_history.isEmpty) return;
+
+    final previous = _history.removeLast();
+
+    await CurrentScheduleStorage.save(
+      ScheduleTarget(
+        type: previous.type,
+        value: previous.value,
+      ),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _scheduleType = previous.type;
+      _selectedItem = previous.value;
+      _selectedDate = previous.date;
       _dayFuture = null;
     });
   }
@@ -229,12 +265,25 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return;
 
-    final target = ScheduleTarget(
-      type: type,
-      value: trimmed,
+    final isSameTarget =
+        _scheduleType == type && _selectedItem.trim() == trimmed;
+
+    if (isSameTarget) return;
+
+    _history.add(
+      _ScheduleNavigationEntry(
+        type: _scheduleType,
+        value: _selectedItem,
+        date: _selectedDate,
+      ),
     );
 
-    await CurrentScheduleStorage.save(target);
+    await CurrentScheduleStorage.save(
+      ScheduleTarget(
+        type: type,
+        value: trimmed,
+      ),
+    );
 
     if (!mounted) return;
 
@@ -275,72 +324,75 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       title: _selectedItem,
       icon: _typeIcon(_scheduleType),
       onRefresh: _refreshSchedule,
-      // если позже решишь добавить выбор прямо тут — повесь onTap
       onTap: null,
-      showDropdownChevron: false, // сейчас не делаем dropdown
+      showDropdownChevron: false,
     );
 
-    return Column(
-      children: [
-        header,
+    return PopScope(
+      canPop: _history.isEmpty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _popScheduleHistory();
+      },
+      child: Column(
+        children: [
+          header,
+          _DatePager(
+            dateText: _formatDate(_selectedDate),
+            onPrev: () => _changeDate(-1),
+            onNext: () => _changeDate(1),
+          ),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragEnd: _handleHorizontalDragEnd,
+              child: FutureBuilder<_DayData>(
+                future: _getDayFuture(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-        // панель даты (как на скрине)
-        _DatePager(
-          dateText: _formatDate(_selectedDate),
-          onPrev: () => _changeDate(-1),
-          onNext: () => _changeDate(1),
-        ),
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Ошибка: ${snapshot.error}'));
+                  }
 
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragEnd: _handleHorizontalDragEnd,
-            child: FutureBuilder<_DayData>(
-              future: _getDayFuture(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+                  final day = snapshot.data!;
+                  final lessons = day.schedule.lessons;
+                  final slots = day.slots;
 
-                if (snapshot.hasError) {
-                  return Center(child: Text('Ошибка: ${snapshot.error}'));
-                }
-
-                final day = snapshot.data!;
-                final lessons = day.schedule.lessons;
-                final slots = day.slots;
-
-                if (lessons.isEmpty) {
-                  return const Center(
-                    child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
-                  );
-                }
-
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  itemCount: lessons.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final lesson = lessons[index];
-
-                    return LessonCard(
-                      lesson: lesson,
-                      number: index + 1,
-                      typeColor: _typeColor(lesson.typeLesson),
-                      slots: slots,
-                      scheduleType: _scheduleType,
-                      onTap: () => _openCreateNote(lesson),
-                      onTeacherTap: (value) => _openTeacherSchedule(value),
-                      onAuditoryTap: (value) => _openAuditorySchedule(value),
-                      onGroupTap: (value) => _openGroupSchedule(value),
+                  if (lessons.isEmpty) {
+                    return const Center(
+                      child: Text('Нет занятий', style: TextStyle(color: Colors.grey)),
                     );
-                  },
-                );
-              },
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                    itemCount: lessons.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final lesson = lessons[index];
+
+                      return LessonCard(
+                        lesson: lesson,
+                        number: index + 1,
+                        typeColor: _typeColor(lesson.typeLesson),
+                        slots: slots,
+                        scheduleType: _scheduleType,
+                        onTap: () => _openCreateNote(lesson),
+                        onTeacherTap: (value) => _openTeacherSchedule(value),
+                        onAuditoryTap: (value) => _openAuditorySchedule(value),
+                        onGroupTap: (value) => _openGroupSchedule(value),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -651,16 +703,19 @@ class _LessonLinkText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(8),
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Text(
           text,
           style: const TextStyle(
             fontSize: 14,
-            color: Colors.blue,
-            decoration: TextDecoration.underline,
+            color: Colors.black87,
             fontWeight: FontWeight.w500,
           ),
         ),
