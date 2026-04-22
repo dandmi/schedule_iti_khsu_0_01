@@ -78,7 +78,8 @@ class ApiClient {
 
   // Поиск
   Future<SearchResponse> search(String query) async {
-    final uri = Uri.parse('$baseUrl/search/$query');
+    final encoded = Uri.encodeComponent(query);
+    final uri = Uri.parse('$baseUrl/search/$encoded');
     final json = await _getJson(uri);
     return SearchResponse.fromJson(json);
   }

@@ -50,6 +50,89 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
     ScheduleType.auditory => 'Аудитории',
   };
 
+  List<String> _buildSearchVariants(String query) {
+    final variants = <String>[];
+    final seen = <String>{};
+
+    void addVariant(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      if (seen.add(trimmed)) {
+        variants.add(trimmed);
+      }
+    }
+
+    addVariant(query);
+    addVariant(query.toLowerCase());
+    addVariant(query.toUpperCase());
+    addVariant(_toTitleCase(query));
+
+    return variants;
+  }
+
+  String _toTitleCase(String input) {
+    final words = input.trim().split(RegExp(r'\s+'));
+    final result = <String>[];
+
+    for (final word in words) {
+      if (word.isEmpty) continue;
+
+      if (word.length == 1) {
+        result.add(word.toUpperCase());
+        continue;
+      }
+
+      final first = word.substring(0, 1).toUpperCase();
+      final rest = word.substring(1).toLowerCase();
+      result.add('$first$rest');
+    }
+
+    return result.join(' ');
+  }
+
+  SearchResponse _mergeSearchResponses(List<SearchResponse> responses) {
+    final names = <String>{};
+    final teacherNames = <String>{};
+    final auditories = <String>{};
+
+    for (final response in responses) {
+      names.addAll(response.names.map((e) => e.trim()).where((e) => e.isNotEmpty));
+      teacherNames.addAll(
+        response.teacherNames.map((e) => e.trim()).where((e) => e.isNotEmpty),
+      );
+      auditories.addAll(
+        response.auditories.map((e) => e.trim()).where((e) => e.isNotEmpty),
+      );
+    }
+
+    return SearchResponse(
+      names: names.toList(),
+      courses: const [],
+      teacherNames: teacherNames.toList(),
+      auditories: auditories.toList(),
+    );
+  }
+
+  Future<SearchResponse> _searchIgnoringCase(String query) async {
+    final variants = _buildSearchVariants(query);
+
+    final responses = <SearchResponse>[];
+    for (final variant in variants) {
+      try {
+        final response = await _apiClient.search(variant);
+        responses.add(response);
+      } catch (_) {
+        // Один вариант может не сработать — продолжаем с другими
+      }
+    }
+
+    if (responses.isEmpty) {
+      throw Exception('Не удалось выполнить поиск');
+    }
+
+    return _mergeSearchResponses(responses);
+  }
+
   Future<void> _performSearch(String query) async {
     final messenger = ScaffoldMessenger.of(context); // берём ДО await
     final q = query.trim();
@@ -71,7 +154,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final result = await _apiClient.search(q);
+      final result = await _searchIgnoringCase(q);
 
       if (!mounted || currentRequest != _requestId) return;
 
