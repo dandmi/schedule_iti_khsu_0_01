@@ -6,6 +6,7 @@ import '../screens/add_favorite_screen.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
 import 'notification_settings_screen.dart';
+import '../utils/schedule_widget_service.dart';
 
 
 class SettingsScreen extends StatefulWidget {
@@ -92,6 +93,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case ThemeMode.system:
         return 'Системная';
     }
+  }
+
+  Future<void> _createWidget() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final message = await ScheduleWidgetService.instance.createOrUpdateTodayWidget();
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось создать виджет: $e')),
+      );
+    }
+  }
+
+  void _showNotImplemented(String title) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$title пока не реализовано')),
+    );
   }
 
   Future<void> _confirmDelete(FavoriteItem item) async {
@@ -390,6 +416,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
               );
             },
           ),
+
+          // ВИДЖЕТ
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.widgets_outlined),
+                  title: const Text('Создать виджет'),
+                  subtitle: const Text('Виджет расписания на текущий день'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _createWidget,
+                ),
+                Divider(
+                  height: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.feedback_outlined),
+                  title: const Text('Обратная связь'),
+                  subtitle: const Text('Сообщить об ошибке или предложить идею'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showNotImplemented('Обратная связь'),
+                ),
+                Divider(
+                  height: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.share_outlined),
+                  title: const Text('Порекомендовать друзьям'),
+                  subtitle: const Text('Поделиться приложением'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showNotImplemented('Порекомендовать друзьям'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
