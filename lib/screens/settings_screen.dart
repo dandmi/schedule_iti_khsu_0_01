@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../utils/schedule_widget_service.dart';
 import 'notification_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -12,15 +13,31 @@ class SettingsScreen extends StatelessWidget {
     required this.onThemeModeChanged,
   });
 
-  String _themeLabel(ThemeMode mode) {
-    switch (mode) {
-      case ThemeMode.dark:
-        return 'Тёмная';
-      case ThemeMode.light:
-        return 'Светлая';
-      case ThemeMode.system:
-        return 'Системная';
+  Future<void> _createWidget(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final message =
+      await ScheduleWidgetService.instance.createOrUpdateTodayWidget();
+
+      if (!context.mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось создать виджет: $e')),
+      );
     }
+  }
+
+  void _showNotImplemented(BuildContext context, String title) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$title пока не реализовано')),
+    );
   }
 
   @override
@@ -69,11 +86,6 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Текущая тема: ${_themeLabel(themeMode)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
             ],
           ),
         ),
@@ -98,6 +110,54 @@ class SettingsScreen extends StatelessWidget {
                 ),
               );
             },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.widgets_outlined),
+            title: const Text('Добавить виджет'),
+            subtitle: const Text('Виджет расписания на текущий день'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _createWidget(context),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.feedback_outlined),
+            title: const Text('Обратная связь'),
+            subtitle: const Text('Сообщить об ошибке или предложить идею'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showNotImplemented(context, 'Обратная связь'),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.share_outlined),
+            title: const Text('Порекомендовать друзьям'),
+            subtitle: const Text('Поделиться приложением'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showNotImplemented(context, 'Порекомендовать друзьям'),
           ),
         ),
       ],
