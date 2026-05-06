@@ -118,7 +118,12 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         lessonId: widget.lessonId,
       );
     }
-    await LocalNotificationService.instance.rescheduleAll();
+
+    try {
+      await LocalNotificationService.instance.rescheduleAll();
+    } catch (e, stack) {
+      debugPrint('❌ Failed to reschedule after save: $e\n$stack');
+    }
 
     if (!mounted) return;
     Navigator.pop(context, true);

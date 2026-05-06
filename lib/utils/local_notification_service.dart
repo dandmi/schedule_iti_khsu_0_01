@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -17,6 +19,10 @@ class LocalNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin =
   FlutterLocalNotificationsPlugin();
+
+  AndroidFlutterLocalNotificationsPlugin? get _androidPlugin =>
+      _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
 
   bool _initialized = false;
 
@@ -51,8 +57,8 @@ class LocalNotificationService {
     try {
       final timezoneName = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(timezoneName));
-    } catch (_) {
-      // Оставляем tz.local по умолчанию
+    } catch (e, stack) {
+      debugPrint('⏰ Timezone config failed: $e\n$stack');
     }
   }
 
@@ -61,30 +67,42 @@ class LocalNotificationService {
       await initialize();
     }
 
-    if (Platform.isAndroid) {
-      final android = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      await android?.requestNotificationsPermission();
-    }
+    try {
+      if (Platform.isAndroid) {
+        final android = _androidPlugin;
+        await android?.requestNotificationsPermission();
 
-    if (Platform.isIOS) {
-      final ios = _plugin.resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin>();
-      await ios?.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-    }
+        final canExact = await android?.canScheduleExactNotifications();
+        if (canExact != true) {
+          try {
+            await android?.requestExactAlarmsPermission();
+          } catch (e, stack) {
+            debugPrint('⏰ requestExactAlarmsPermission failed: $e\n$stack');
+          }
+        }
+      }
 
-    if (Platform.isMacOS) {
-      final mac = _plugin.resolvePlatformSpecificImplementation<
-          MacOSFlutterLocalNotificationsPlugin>();
-      await mac?.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+      if (Platform.isIOS) {
+        final ios = _plugin.resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin>();
+        await ios?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+
+      if (Platform.isMacOS) {
+        final mac = _plugin.resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin>();
+        await mac?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+    } catch (e, stack) {
+      debugPrint('⏰ requestPermissions failed: $e\n$stack');
     }
   }
 
@@ -93,21 +111,42 @@ class LocalNotificationService {
       await initialize();
     }
 
-    await _plugin.cancelAll();
+    try {
+      await _plugin.cancelAll();
 
-    final settings = await NotificationSettingsStorage.load();
+      final settings = await NotificationSettingsStorage.load();
 
-    if (settings.noteReminderEnabled) {
-      await _scheduleNoteReminders(
-        minutesBefore: settings.noteReminderMinutesBefore,
-      );
+      if (settings.noteReminderEnabled) {
+        await _scheduleNoteReminders(
+          minutesBefore: settings.noteReminderMinutesBefore,
+        );
+      }
+
+      if (settings.lessonReminderEnabled) {
+        await _scheduleLessonReminders(
+          minutesBefore: settings.lessonReminderMinutesBefore,
+        );
+      }
+    } catch (e, stack) {
+      debugPrint('⏰ rescheduleAll failed: $e\n$stack');
+    }
+  }
+
+  Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
+    if (!Platform.isAndroid) {
+      return AndroidScheduleMode.inexactAllowWhileIdle;
     }
 
-    if (settings.lessonReminderEnabled) {
-      await _scheduleLessonReminders(
-        minutesBefore: settings.lessonReminderMinutesBefore,
-      );
+    try {
+      final canExact = await _androidPlugin?.canScheduleExactNotifications();
+      if (canExact == true) {
+        return AndroidScheduleMode.exactAllowWhileIdle;
+      }
+    } catch (e, stack) {
+      debugPrint('⏰ canScheduleExactNotifications failed: $e\n$stack');
     }
+
+    return AndroidScheduleMode.inexactAllowWhileIdle;
   }
 
   Future<void> _scheduleNoteReminders({
@@ -116,6 +155,7 @@ class LocalNotificationService {
     final db = DatabaseHelper();
     final notes = await db.getNotesWithDueAt();
     final now = tz.TZDateTime.now(tz.local);
+    final scheduleMode = await _resolveAndroidScheduleMode();
 
     for (final note in notes) {
       final dueAtMillis = note.dueAt;
@@ -127,7 +167,6 @@ class LocalNotificationService {
       );
 
       final notifyAt = dueAt.subtract(Duration(minutes: minutesBefore));
-
       if (!notifyAt.isAfter(now)) continue;
 
       final title = (note.title ?? '').trim().isNotEmpty
@@ -141,15 +180,21 @@ class LocalNotificationService {
       }
       bodyParts.add('Срок: ${_formatDateTime(dueAt)}');
 
-      await _plugin.zonedSchedule(
-        id: _stableId('note:${note.id}:${note.dueAt}'),
-        title: title,
-        body: bodyParts.join(' • '),
-        scheduledDate: notifyAt,
-        notificationDetails: _noteNotificationDetails(),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: 'note:${note.id ?? 0}',
-      );
+      try {
+        await _plugin.zonedSchedule(
+          id: _stableId('note:${note.id}:${note.dueAt}'),
+          title: title,
+          body: bodyParts.join(' • '),
+          scheduledDate: notifyAt,
+          notificationDetails: _noteNotificationDetails(),
+          androidScheduleMode: scheduleMode,
+          payload: 'note:${note.id ?? 0}',
+        );
+      } on PlatformException catch (e, stack) {
+        debugPrint('⏰ Note zonedSchedule PlatformException: $e\n$stack');
+      } catch (e, stack) {
+        debugPrint('⏰ Note zonedSchedule failed: $e\n$stack');
+      }
     }
   }
 
@@ -167,11 +212,11 @@ class LocalNotificationService {
     );
 
     final now = tz.TZDateTime.now(tz.local);
+    final scheduleMode = await _resolveAndroidScheduleMode();
 
     for (final lesson in lessons) {
       final startAt = tz.TZDateTime.from(lesson.startAt, tz.local);
       final notifyAt = startAt.subtract(Duration(minutes: minutesBefore));
-
       if (!notifyAt.isAfter(now)) continue;
 
       final subtitleParts = <String>[];
@@ -189,17 +234,23 @@ class LocalNotificationService {
           ? 'Начало в ${_formatTime(startAt)}'
           : '${subtitleParts.join(' • ')} • ${_formatTime(startAt)}';
 
-      await _plugin.zonedSchedule(
-        id: _stableId(
-          'lesson:${lesson.targetType}:${lesson.targetValue}:${lesson.lessonId}:${lesson.startAt.millisecondsSinceEpoch}',
-        ),
-        title: 'Скоро занятие: ${lesson.subject}',
-        body: body,
-        scheduledDate: notifyAt,
-        notificationDetails: _lessonNotificationDetails(),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: 'lesson:${lesson.lessonId}',
-      );
+      try {
+        await _plugin.zonedSchedule(
+          id: _stableId(
+            'lesson:${lesson.targetType}:${lesson.targetValue}:${lesson.lessonId}:${lesson.startAt.millisecondsSinceEpoch}',
+          ),
+          title: 'Скоро занятие: ${lesson.subject}',
+          body: body,
+          scheduledDate: notifyAt,
+          notificationDetails: _lessonNotificationDetails(),
+          androidScheduleMode: scheduleMode,
+          payload: 'lesson:${lesson.lessonId}',
+        );
+      } on PlatformException catch (e, stack) {
+        debugPrint('⏰ Lesson zonedSchedule PlatformException: $e\n$stack');
+      } catch (e, stack) {
+        debugPrint('⏰ Lesson zonedSchedule failed: $e\n$stack');
+      }
     }
   }
 

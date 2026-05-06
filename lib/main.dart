@@ -6,9 +6,13 @@ import 'utils/theme_storage.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await LocalNotificationService.instance.initialize();
-  await LocalNotificationService.instance.requestPermissions();
-  await LocalNotificationService.instance.rescheduleAll();
+  try {
+    await LocalNotificationService.instance.initialize();
+    await LocalNotificationService.instance.requestPermissions();
+    await LocalNotificationService.instance.rescheduleAll();
+  } catch (e, stack) {
+    debugPrint('❌ Notification bootstrap failed: $e\n$stack');
+  }
 
   runApp(const MyApp());
 }

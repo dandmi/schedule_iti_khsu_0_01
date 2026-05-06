@@ -48,7 +48,13 @@ class NotesScreenState extends State<NotesScreen> {
     if (note.id == null) return;
 
     await _db.deleteNote(note.id!);
-    await LocalNotificationService.instance.rescheduleAll();
+
+    try {
+      await LocalNotificationService.instance.rescheduleAll();
+    } catch (e, stack) {
+      debugPrint('❌ Failed to reschedule after delete: $e\n$stack');
+    }
+
     _reload();
   }
 
