@@ -26,10 +26,13 @@ class MainLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appTitle = title ?? _titles[currentIndex];
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.green,
+        backgroundColor: scheme.surfaceContainer,
+        foregroundColor: scheme.onSurface,
+        surfaceTintColor: Colors.transparent,
         centerTitle: true,
         title: Text(appTitle),
       ),
@@ -38,10 +41,22 @@ class MainLayout extends StatelessWidget {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: currentIndex,
         onTap: onIndexChanged,
+        backgroundColor: scheme.surface,
+        selectedItemColor: scheme.primary,
+        unselectedItemColor: scheme.onSurfaceVariant,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.schedule), label: 'Расписание'),
-          BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Заметки'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Доп. возможности'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.schedule),
+            label: 'Расписание',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.book),
+            label: 'Заметки',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Доп. возможности',
+          ),
         ],
       ),
     );

@@ -1,12 +1,9 @@
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
 import '../models/schedule_response.dart';
-
-// ==========================
-// МОДЕЛИ ОТВЕТОВ
-// ==========================
-
-
+import '../utils/schedule_type.dart';
 
 class SearchResponse {
   final List<String> names;
@@ -31,10 +28,6 @@ class SearchResponse {
   }
 }
 
-// ==========================
-// API КЛИЕНТ
-// ==========================
-
 class ApiClient {
   static const String baseUrl = 'https://t2.iti-khsu.ru/api';
 
@@ -46,7 +39,7 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {
-    final response = await http.get(uri);
+    final response = await http.get(uri).timeout(const Duration(seconds: 6));
     if (response.statusCode == 200) {
       return json.decode(response.body) as Map<String, dynamic>;
     } else {
@@ -54,29 +47,56 @@ class ApiClient {
     }
   }
 
-  // Получить расписание группы
+  Future<bool> hasInternetConnection() async {
+    try {
+      final response = await http
+          .get(Uri.parse('https://t2.iti-khsu.ru'))
+          .timeout(const Duration(seconds: 3));
+
+      return response.statusCode > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<ScheduleResponse> fetchSchedule({
+    required ScheduleType type,
+    required String value,
+    required DateTime date,
+  }) async {
+    switch (type) {
+      case ScheduleType.group:
+        return getGroupSchedule(value, date);
+      case ScheduleType.teacher:
+        return getTeacherSchedule(value, date);
+      case ScheduleType.auditory:
+        return getAuditorySchedule(value, date);
+    }
+  }
+
   Future<ScheduleResponse> getGroupSchedule(String group, DateTime date) async {
     final uri = Uri.parse('$baseUrl/getpairs/date:$group:${_formatDate(date)}');
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }
 
-  // Получить расписание преподавателя
   Future<ScheduleResponse> getTeacherSchedule(String name, DateTime date) async {
-    final uri = Uri.parse('$baseUrl/getpairs/teacher:$name:${_formatDate(date)}');
+    final uri =
+    Uri.parse('$baseUrl/getpairs/teacher:$name:${_formatDate(date)}');
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }
 
-  // Получить расписание аудитории
-  Future<ScheduleResponse> getAuditorySchedule(String auditory, DateTime date) async {
-    final uri = Uri.parse('$baseUrl/getpairs/auditory:$auditory:${_formatDate(date)}');
+  Future<ScheduleResponse> getAuditorySchedule(
+      String auditory,
+      DateTime date,
+      ) async {
+    final uri =
+    Uri.parse('$baseUrl/getpairs/auditory:$auditory:${_formatDate(date)}');
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }
 
-
-  // Поиск
   Future<SearchResponse> search(String query) async {
     final encoded = Uri.encodeComponent(query);
     final uri = Uri.parse('$baseUrl/search/$encoded');

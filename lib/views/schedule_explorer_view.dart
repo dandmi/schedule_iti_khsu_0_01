@@ -14,6 +14,7 @@ import '../utils/current_schedule_storage.dart';
 import '../utils/local_notification_service.dart';
 import '../utils/schedule_type.dart';
 import '../utils/app_refresh_bus.dart';
+import '../utils/schedule_sync_service.dart';
 import 'dart:math' as math;
 
 class ScheduleExplorerView extends StatefulWidget {
@@ -162,73 +163,49 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     final targetType = _scheduleType.name;
     final targetValue = _selectedItem;
 
-    if (!forceRefresh) {
-      final cachedLessons = await _db.getSchedule(
-        date: dateStr,
-        targetType: targetType,
-        targetValue: targetValue,
-      );
+    final hasInternet = await _apiClient.hasInternetConnection();
 
-      if (cachedLessons.isNotEmpty) {
-        return ScheduleResponse(
-          weekday: _selectedDate.weekday,
-          weekNumber: 0,
-          lessons: cachedLessons,
+    if (hasInternet) {
+      try {
+        final response = await _apiClient.fetchSchedule(
+          type: _scheduleType,
+          value: targetValue,
+          date: _selectedDate,
         );
+
+        await _db.saveSchedule(
+          date: dateStr,
+          weekday: response.weekday,
+          lessons: response.lessons,
+          targetType: targetType,
+          targetValue: targetValue,
+        );
+
+        return response;
+      } catch (_) {
+        // ниже fallback в БД
       }
     }
 
-    try {
-      late final ScheduleResponse response;
+    final cachedLessons = await _db.getSchedule(
+      date: dateStr,
+      targetType: targetType,
+      targetValue: targetValue,
+    );
 
-      switch (_scheduleType) {
-        case ScheduleType.group:
-          response = await _apiClient.getGroupSchedule(
-            targetValue,
-            _selectedDate,
-          );
-          break;
-        case ScheduleType.teacher:
-          response = await _apiClient.getTeacherSchedule(
-            targetValue,
-            _selectedDate,
-          );
-          break;
-        case ScheduleType.auditory:
-          response = await _apiClient.getAuditorySchedule(
-            targetValue,
-            _selectedDate,
-          );
-          break;
-      }
-
-      await _db.saveSchedule(
-        date: dateStr,
-        weekday: response.weekday,
-        lessons: response.lessons,
-        targetType: targetType,
-        targetValue: targetValue,
+    if (cachedLessons.isNotEmpty) {
+      return ScheduleResponse(
+        weekday: _selectedDate.weekday,
+        weekNumber: 0,
+        lessons: cachedLessons,
       );
+    }
 
-      await LocalNotificationService.instance.rescheduleAll();
-      return response;
-    } catch (_) {
-      final fallbackCached = await _db.getSchedule(
-        date: dateStr,
-        targetType: targetType,
-        targetValue: targetValue,
-      );
-
-      if (fallbackCached.isNotEmpty) {
-        return ScheduleResponse(
-          weekday: _selectedDate.weekday,
-          weekNumber: 0,
-          lessons: fallbackCached,
-        );
-      }
-
+    if (!hasInternet) {
       throw Exception('Нет подключения к интернету. Расписание не загружено.');
     }
+
+    throw Exception('Не удалось обновить расписание.');
   }
 
   Future<void> _refreshSchedule() async {
@@ -310,6 +287,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       ),
     );
 
+    await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
     await LocalNotificationService.instance.rescheduleAll();
 
     if (!mounted) return;
@@ -354,6 +332,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       ),
     );
 
+    await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
     await LocalNotificationService.instance.rescheduleAll();
 
     if (!mounted) return;

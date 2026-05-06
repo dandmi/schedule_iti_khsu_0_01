@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../utils/app_refresh_bus.dart';
+import '../utils/local_notification_service.dart';
+import '../utils/schedule_sync_service.dart';
 import '../widgets/main_layout.dart';
 import 'notes_screen.dart';
 import 'schedule_screen.dart';
@@ -31,6 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _buildPages();
+    _bootstrapData();
   }
 
   @override
@@ -42,6 +46,22 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _buildPages();
       });
+    }
+  }
+
+  Future<void> _bootstrapData() async {
+    final online = await ScheduleSyncService.instance.syncOnAppStart();
+
+    try {
+      await LocalNotificationService.instance.rescheduleAll();
+    } catch (e, stack) {
+      debugPrint('❌ Failed to reschedule after bootstrap: $e\n$stack');
+    }
+
+    if (!mounted) return;
+
+    if (online) {
+      AppRefreshBus.markScheduleChanged();
     }
   }
 
