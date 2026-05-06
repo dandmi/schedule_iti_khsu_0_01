@@ -39,7 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (oldWidget.themeMode != widget.themeMode ||
         oldWidget.onThemeModeChanged != widget.onThemeModeChanged) {
-      _buildPages();
+      setState(() {
+        _buildPages();
+      });
     }
   }
 
@@ -56,18 +58,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onTab(int i) {
     setState(() => _index = i);
-
-    if (i == 1) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _notesKey.currentState?.reload();
-      });
-    }
-
-    if (i == 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scheduleKey.currentState?.reload();
-      });
-    }
   }
 
   @override

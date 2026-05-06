@@ -13,6 +13,8 @@ import '../screens/note_edit_screen.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/local_notification_service.dart';
 import '../utils/schedule_type.dart';
+import '../utils/app_refresh_bus.dart';
+import 'dart:math' as math;
 
 class ScheduleExplorerView extends StatefulWidget {
   final ScheduleType initialType;
@@ -46,6 +48,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
 
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
+  Brightness? _lastBrightness;
 
   @override
   void initState() {
@@ -72,6 +75,22 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _history.clear();
       _reloadSideData();
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    final brightness = Theme.of(context).brightness;
+
+    if (_lastBrightness != null && _lastBrightness != brightness) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {});
+      });
+    }
+
+    _lastBrightness = brightness;
   }
 
   @override
@@ -354,78 +373,34 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       isScrollControlled: true,
       builder: (sheetContext) {
         return _FavoritesBottomSheet(
-          favoritesFuture: _favoritesFuture ?? _db.getFavorites(),
+          db: _db,
           activeType: _scheduleType,
           activeValue: _selectedItem,
-          onSelect: (item) async {
-            Navigator.of(sheetContext).pop();
+          onTargetChosen: (target) async {
+            if (Navigator.of(sheetContext).canPop()) {
+              Navigator.of(sheetContext).pop();
+            }
+
             await _openScheduleTarget(
-              type: item.scheduleType,
-              value: item.name,
+              type: target.type,
+              value: target.value,
               addToHistory: false,
             );
+
             if (!mounted) return;
+
+            AppRefreshBus.markScheduleChanged();
+
             setState(() {
               _reloadSideData();
             });
-          },
-          onAdd: () async {
-            Navigator.of(sheetContext).pop();
-            final added = await Navigator.push<bool>(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const AddFavoriteScreen(),
-              ),
-            );
-
-            if (!mounted) return;
-
-            if (added == true) {
-              setState(() {
-                _favoritesFuture = _db.getFavorites();
-              });
-            }
-          },
-          onDelete: (item) async {
-            final confirmed = await showDialog<bool>(
-              context: context,
-              builder: (dialogContext) {
-                return AlertDialog(
-                  title: const Text('Удаление избранного'),
-                  content: Text('Удалить "${item.name}" из избранного?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('Отмена'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('Удалить'),
-                    ),
-                  ],
-                );
-              },
-            );
-
-            if (confirmed != true) return;
-
-            await _db.removeFavorite(item.id);
-
-            if (!mounted) return;
-
-            setState(() {
-              _favoritesFuture = _db.getFavorites();
-            });
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Удалено: ${item.name}')),
-            );
           },
         );
       },
     );
 
     if (!mounted) return;
+
     setState(() {
       _favoritesFuture = _db.getFavorites();
     });
@@ -1149,33 +1124,23 @@ class _LessonTimeCircle extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          SizedBox(
-            width: 74,
-            height: 74,
-            child: CircularProgressIndicator(
-              value: 1,
-              strokeWidth: 5,
-              valueColor: AlwaysStoppedAnimation<Color>(borderColor),
-              backgroundColor: Colors.transparent,
+          CustomPaint(
+            size: const Size(74, 74),
+            painter: _LessonTimeRingPainter(
+              isCurrent: isCurrent,
+              progress: progress,
+              baseColor: borderColor,
+              darkColor: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.black.withValues(alpha: 0.55)
+                  : Colors.black.withValues(alpha: 0.45),
             ),
           ),
-          if (isCurrent)
-            SizedBox(
-              width: 74,
-              height: 74,
-              child: CircularProgressIndicator(
-                value: progress,
-                strokeWidth: 5,
-                valueColor: AlwaysStoppedAnimation<Color>(accent),
-                backgroundColor: Colors.transparent,
-              ),
-            ),
           Container(
             width: 60,
             height: 60,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: scheme.surface.withValues(alpha: 0.70),
+              color: scheme.surface.withValues(alpha: 0.72),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -1214,6 +1179,66 @@ class _LessonTimeCircle extends StatelessWidget {
   }
 }
 
+class _LessonTimeRingPainter extends CustomPainter {
+  final bool isCurrent;
+  final double progress;
+  final Color baseColor;
+  final Color darkColor;
+
+  const _LessonTimeRingPainter({
+    required this.isCurrent,
+    required this.progress,
+    required this.baseColor,
+    required this.darkColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const strokeWidth = 5.0;
+    final rect = Offset.zero & size;
+
+    final basePaint = Paint()
+      ..color = baseColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(
+      rect.deflate(strokeWidth / 2),
+      -math.pi / 2,
+      math.pi * 2,
+      false,
+      basePaint,
+    );
+
+    if (!isCurrent) return;
+
+    final remaining = (1 - progress).clamp(0.0, 1.0);
+
+    final darkPaint = Paint()
+      ..color = darkColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(
+      rect.deflate(strokeWidth / 2),
+      -math.pi / 2,
+      -math.pi * 2 * remaining,
+      false,
+      darkPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LessonTimeRingPainter oldDelegate) {
+    return oldDelegate.isCurrent != isCurrent ||
+        oldDelegate.progress != progress ||
+        oldDelegate.baseColor != baseColor ||
+        oldDelegate.darkColor != darkColor;
+  }
+}
+
 class _LessonLinkChip extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
@@ -1249,22 +1274,43 @@ class _LessonLinkChip extends StatelessWidget {
   }
 }
 
-class _FavoritesBottomSheet extends StatelessWidget {
-  final Future<List<FavoriteItem>> favoritesFuture;
+class _FavoritesBottomSheet extends StatefulWidget {
+  final DatabaseHelper db;
   final ScheduleType activeType;
   final String activeValue;
-  final ValueChanged<FavoriteItem> onSelect;
-  final Future<void> Function() onAdd;
-  final Future<void> Function(FavoriteItem item) onDelete;
+  final Future<void> Function(ScheduleTarget target) onTargetChosen;
 
   const _FavoritesBottomSheet({
-    required this.favoritesFuture,
+    required this.db,
     required this.activeType,
     required this.activeValue,
-    required this.onSelect,
-    required this.onAdd,
-    required this.onDelete,
+    required this.onTargetChosen,
   });
+
+  @override
+  State<_FavoritesBottomSheet> createState() => _FavoritesBottomSheetState();
+}
+
+class _FavoritesBottomSheetState extends State<_FavoritesBottomSheet> {
+  bool _isLoading = true;
+  List<FavoriteItem> _favorites = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final favorites = await widget.db.getFavorites();
+
+    if (!mounted) return;
+
+    setState(() {
+      _favorites = favorites;
+      _isLoading = false;
+    });
+  }
 
   IconData _iconFor(ScheduleType type) {
     switch (type) {
@@ -1277,71 +1323,123 @@ class _FavoritesBottomSheet extends StatelessWidget {
     }
   }
 
+  Future<void> _deleteFavorite(FavoriteItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Удаление избранного'),
+          content: Text('Удалить "${item.name}" из избранного?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    await widget.db.removeFavorite(item.id);
+
+    if (!mounted) return;
+
+    setState(() {
+      _favorites.removeWhere((e) => e.id == item.id);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Удалено: ${item.name}')),
+    );
+  }
+
+  Future<void> _addFavorite() async {
+    final target = await Navigator.of(context).push<ScheduleTarget>(
+      MaterialPageRoute(
+        builder: (_) => const AddFavoriteScreen(),
+      ),
+    );
+
+    if (!mounted || target == null) return;
+
+    await _loadFavorites();
+
+    if (!mounted) return;
+
+    await widget.onTargetChosen(target);
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const SafeArea(
+        child: SizedBox(
+          height: 240,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
     return SafeArea(
-      child: FutureBuilder<List<FavoriteItem>>(
-        future: favoritesFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const SizedBox(
-              height: 240,
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-
-          final favorites = snapshot.data ?? [];
-
-          return ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 480),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const ListTile(
-                  title: Text(
-                    'Избранные расписания',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final item in favorites)
-                        ListTile(
-                          leading: Icon(_iconFor(item.scheduleType)),
-                          title: Text(item.name),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (item.scheduleType == activeType &&
-                                  item.name == activeValue)
-                                const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: Colors.green,
-                                ),
-                              IconButton(
-                                tooltip: 'Удалить',
-                                onPressed: () => onDelete(item),
-                                icon: const Icon(Icons.delete_outline_rounded),
-                              ),
-                            ],
-                          ),
-                          onTap: () => onSelect(item),
-                        ),
-                      const Divider(height: 1),
-                      ListTile(
-                        leading: const Icon(Icons.add_rounded),
-                        title: const Text('Добавить в избранное'),
-                        onTap: onAdd,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 480),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Избранные расписания',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
             ),
-          );
-        },
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final item in _favorites)
+                    ListTile(
+                      leading: Icon(_iconFor(item.scheduleType)),
+                      title: Text(item.name),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (item.scheduleType == widget.activeType &&
+                              item.name == widget.activeValue)
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              color: Colors.green,
+                            ),
+                          IconButton(
+                            tooltip: 'Удалить',
+                            onPressed: () => _deleteFavorite(item),
+                            icon: const Icon(Icons.delete_outline_rounded),
+                          ),
+                        ],
+                      ),
+                      onTap: () => widget.onTargetChosen(
+                        ScheduleTarget(
+                          type: item.scheduleType,
+                          value: item.name,
+                        ),
+                      ),
+                    ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.add_rounded),
+                    title: const Text('Добавить в избранное'),
+                    onTap: _addFavorite,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

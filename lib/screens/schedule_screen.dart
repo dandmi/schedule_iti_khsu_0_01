@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/schedule_target.dart';
 import '../utils/current_schedule_storage.dart';
 import '../views/schedule_explorer_view.dart';
+import '../utils/app_refresh_bus.dart';
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -19,6 +20,17 @@ class ScheduleScreenState extends State<ScheduleScreen> {
   void initState() {
     super.initState();
     _initialTargetFuture = _loadInitialTarget();
+    AppRefreshBus.scheduleVersion.addListener(_onExternalScheduleChanged);
+  }
+
+  @override
+  void dispose() {
+    AppRefreshBus.scheduleVersion.removeListener(_onExternalScheduleChanged);
+    super.dispose();
+  }
+
+  void _onExternalScheduleChanged() {
+    reload();
   }
 
   Future<ScheduleTarget?> _loadInitialTarget() async {

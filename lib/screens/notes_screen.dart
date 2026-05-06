@@ -3,6 +3,7 @@ import '../database/database_helper.dart';
 import '../models/note.dart';
 import 'note_edit_screen.dart';
 import '../utils/local_notification_service.dart';
+import '../utils/app_refresh_bus.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -17,6 +18,22 @@ class NotesScreenState extends State<NotesScreen> {
   void _reload() {
     if (!mounted) return;
     setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    AppRefreshBus.notesVersion.addListener(_onExternalNotesChanged);
+  }
+
+  @override
+  void dispose() {
+    AppRefreshBus.notesVersion.removeListener(_onExternalNotesChanged);
+    super.dispose();
+  }
+
+  void _onExternalNotesChanged() {
+    _reload();
   }
 
   Future<void> reload() async => _reload();
@@ -54,6 +71,9 @@ class NotesScreenState extends State<NotesScreen> {
     } catch (e, stack) {
       debugPrint('❌ Failed to reschedule after delete: $e\n$stack');
     }
+
+    AppRefreshBus.markNotesChanged();
+    AppRefreshBus.markScheduleChanged();
 
     _reload();
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:schedule_iti_khsu_0_01/api/api_client.dart';
 import 'package:schedule_iti_khsu_0_01/database/database_helper.dart';
 import 'package:schedule_iti_khsu_0_01/utils/schedule_type.dart';
+import '../models/schedule_target.dart';
 
 class _SuggestionItem {
   final ScheduleType type;
@@ -199,14 +200,19 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
   }
 
   Future<void> _addFavorite(_SuggestionItem item) async {
-    final navigator = Navigator.of(context); // берём ДО await
+    final navigator = Navigator.of(context);
 
     await _db.addFavorite(
       name: item.value,
-      type: item.type.name, // group/teacher/auditory
+      type: item.type.name,
     );
 
-    navigator.pop(true);
+    navigator.pop(
+      ScheduleTarget(
+        type: item.type,
+        value: item.value,
+      ),
+    );
   }
 
   @override
