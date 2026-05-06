@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../widgets/main_layout.dart';
-import 'schedule_screen.dart';
 import 'notes_screen.dart';
+import 'schedule_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -49,10 +50,6 @@ class _HomeScreenState extends State<HomeScreen> {
       SettingsScreen(
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
-        onScheduleChanged: () {
-          _scheduleKey.currentState?.reload();
-          setState(() => _index = 0);
-        },
       ),
     ];
   }
@@ -63,6 +60,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (i == 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _notesKey.currentState?.reload();
+      });
+    }
+
+    if (i == 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scheduleKey.currentState?.reload();
       });
     }
   }

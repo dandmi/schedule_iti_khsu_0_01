@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:schedule_iti_khsu_0_01/api/api_client.dart';
-import '../screens/note_edit_screen.dart';
+
+import '../api/api_client.dart';
 import '../database/database_helper.dart';
-import '../models/schedule_response.dart';
+import '../models/favorite_item.dart';
 import '../models/lesson.dart';
-import '../utils/schedule_type.dart';
+import '../models/schedule_response.dart';
 import '../models/schedule_target.dart';
+import '../screens/add_favorite_screen.dart';
+import '../screens/note_edit_screen.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/local_notification_service.dart';
+import '../utils/schedule_type.dart';
 
 class ScheduleExplorerView extends StatefulWidget {
   final ScheduleType initialType;
@@ -18,42 +23,29 @@ class ScheduleExplorerView extends StatefulWidget {
     super.key,
     required this.initialType,
     required this.initialValue,
-    this.isFavorite = true,
+    this.isFavorite = false,
   });
 
   @override
-  State<ScheduleExplorerView> createState() => _ScheduleExplorerViewState();
+  State<ScheduleExplorerView> createState() => ScheduleExplorerViewState();
 }
 
-class _DayData {
-  final ScheduleResponse schedule;
-  final Map<int, ({String start, String end})> slots;
-  _DayData(this.schedule, this.slots);
-}
-
-class _ScheduleNavigationEntry {
-  final ScheduleType type;
-  final String value;
-  final DateTime date;
-
-  const _ScheduleNavigationEntry({
-    required this.type,
-    required this.value,
-    required this.date,
-  });
-}
-
-
-class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
-  final ApiClient _apiClient = ApiClient();
-  final DatabaseHelper _db = DatabaseHelper();
+class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
+  final _apiClient = ApiClient();
+  final _db = DatabaseHelper();
 
   late ScheduleType _scheduleType;
   late String _selectedItem;
   DateTime _selectedDate = DateTime.now();
+
   Future<_DayData>? _dayFuture;
+  Future<List<FavoriteItem>>? _favoritesFuture;
+  Future<Set<String>>? _noteSubjectsFuture;
+
   final List<_ScheduleNavigationEntry> _history = [];
 
+  Timer? _clockTimer;
+  DateTime _now = DateTime.now();
 
   @override
   void initState() {
@@ -61,6 +53,9 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     _scheduleType = widget.initialType;
     _selectedItem = widget.initialValue;
     _selectedDate = DateTime.now();
+
+    _reloadSideData();
+    _startClock();
   }
 
   @override
@@ -75,161 +70,159 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _selectedDate = DateTime.now();
       _dayFuture = null;
       _history.clear();
+      _reloadSideData();
     }
   }
 
-  // ---------- helpers ----------
-
-  String _dateStr(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  String _formatDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
-
-  IconData _typeIcon(ScheduleType t) => switch (t) {
-    ScheduleType.group => Icons.group,
-    ScheduleType.teacher => Icons.person,
-    ScheduleType.auditory => Icons.location_on,
-  };
-
-  Color _typeColor(BuildContext context, String typeLesson) {
-    final t = typeLesson.toLowerCase().trim();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final scheme = Theme.of(context).colorScheme;
-
-    if (t.contains('зач') || t.contains('экз')) {
-      return isDark ? Colors.red.shade300 : Colors.red.shade700;
-    }
-    if (t.contains('лаб')) {
-      return isDark ? Colors.orange.shade300 : Colors.orange.shade800;
-    }
-    if (t.contains('пр')) {
-      return isDark ? Colors.amber.shade300 : Colors.amber.shade800;
-    }
-    if (t.contains('л')) {
-      return isDark ? Colors.green.shade300 : Colors.green.shade700;
-    }
-
-    return scheme.onSurfaceVariant;
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
   }
 
+  Future<void> refreshExternalData() async {
+    if (!mounted) return;
+
+    setState(() {
+      _reloadSideData();
+      _dayFuture = null;
+    });
+  }
+
+  void _reloadSideData() {
+    _favoritesFuture = _db.getFavorites();
+    _noteSubjectsFuture = _loadNoteSubjects();
+  }
+
+  void _startClock() {
+    _clockTimer?.cancel();
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      setState(() {
+        _now = DateTime.now();
+      });
+    });
+  }
+
+  Future<Set<String>> _loadNoteSubjects() async {
+    final notes = await _db.getNotes();
+
+    return notes
+        .map((n) => (n.subject ?? '').trim())
+        .where((s) => s.isNotEmpty)
+        .map(_normalizeSubject)
+        .toSet();
+  }
+
+  String _normalizeSubject(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<_DayData> _getDayData({required bool forceRefresh}) async {
+    final slots = await _db.getTimeSlots();
+    final schedule =
+    await _loadScheduleFromApiOrCache(forceRefresh: forceRefresh);
+
+    return _DayData(schedule: schedule, slots: slots);
+  }
+
+  Future<_DayData> _getDayFuture() {
+    _dayFuture ??= _getDayData(forceRefresh: false);
+    return _dayFuture!;
+  }
+
+  Future<ScheduleResponse> _loadScheduleFromApiOrCache({
+    required bool forceRefresh,
+  }) async {
+    final dateStr =
+        '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
+
+    final targetType = _scheduleType.name;
+    final targetValue = _selectedItem;
+
+    if (!forceRefresh) {
+      final cachedLessons = await _db.getSchedule(
+        date: dateStr,
+        targetType: targetType,
+        targetValue: targetValue,
+      );
+
+      if (cachedLessons.isNotEmpty) {
+        return ScheduleResponse(
+          weekday: _selectedDate.weekday,
+          weekNumber: 0,
+          lessons: cachedLessons,
+        );
+      }
+    }
+
+    try {
+      late final ScheduleResponse response;
+
+      switch (_scheduleType) {
+        case ScheduleType.group:
+          response = await _apiClient.getGroupSchedule(
+            targetValue,
+            _selectedDate,
+          );
+          break;
+        case ScheduleType.teacher:
+          response = await _apiClient.getTeacherSchedule(
+            targetValue,
+            _selectedDate,
+          );
+          break;
+        case ScheduleType.auditory:
+          response = await _apiClient.getAuditorySchedule(
+            targetValue,
+            _selectedDate,
+          );
+          break;
+      }
+
+      await _db.saveSchedule(
+        date: dateStr,
+        weekday: response.weekday,
+        lessons: response.lessons,
+        targetType: targetType,
+        targetValue: targetValue,
+      );
+
+      await LocalNotificationService.instance.rescheduleAll();
+      return response;
+    } catch (_) {
+      final fallbackCached = await _db.getSchedule(
+        date: dateStr,
+        targetType: targetType,
+        targetValue: targetValue,
+      );
+
+      if (fallbackCached.isNotEmpty) {
+        return ScheduleResponse(
+          weekday: _selectedDate.weekday,
+          weekNumber: 0,
+          lessons: fallbackCached,
+        );
+      }
+
+      throw Exception('Нет подключения к интернету. Расписание не загружено.');
+    }
+  }
+
+  Future<void> _refreshSchedule() async {
+    setState(() {
+      _dayFuture = _getDayData(forceRefresh: true);
+    });
+  }
 
   void _changeDate(int deltaDays) {
     setState(() {
       _selectedDate = _selectedDate.add(Duration(days: deltaDays));
       _dayFuture = null;
     });
-  }
-
-  Future<void> _popScheduleHistory() async {
-    if (_history.isEmpty) return;
-
-    final previous = _history.removeLast();
-
-    await CurrentScheduleStorage.save(
-      ScheduleTarget(
-        type: previous.type,
-        value: previous.value,
-      ),
-    );
-
-    await LocalNotificationService.instance.rescheduleAll();
-
-    if (!mounted) return;
-
-    setState(() {
-      _scheduleType = previous.type;
-      _selectedItem = previous.value;
-      _selectedDate = previous.date;
-      _dayFuture = null;
-    });
-  }
-
-  // ---------- data load ----------
-
-  Future<_DayData> _getDayFuture() {
-    _dayFuture ??= _loadDay(forceRefresh: false);
-    return _dayFuture!;
-  }
-
-  Future<_DayData> _loadDay({required bool forceRefresh}) async {
-    final schedule = await _loadScheduleFromApiOrCache(forceRefresh: forceRefresh);
-    final slots = await _db.getTimeSlots();
-    return _DayData(schedule, slots);
-  }
-
-
-
-
-  Future<ScheduleResponse> _loadScheduleFromApiOrCache({required bool forceRefresh}) async {
-    final dateStr = _dateStr(_selectedDate);
-    final targetType = _scheduleType.name; // group/teacher/auditory
-    final targetValue = _selectedItem;
-
-    debugPrint('📅 Запрос: $targetType / $targetValue / $dateStr (force=$forceRefresh)');
-
-    // 1) если не форсим — читаем кэш
-    if (!forceRefresh) {
-      final cached = await _db.getSchedule(
-        date: dateStr,
-        targetType: targetType,
-        targetValue: targetValue,
-      );
-
-      if (cached.isNotEmpty) {
-        return ScheduleResponse(
-          weekday: _selectedDate.weekday,
-          weekNumber: 0,
-          lessons: cached,
-        );
-      }
-    } else {
-      // при forceRefresh можно очистить старые записи этой даты/цели
-      // saveSchedule у тебя и так delete+insert, поэтому отдельно чистить не обязательно
-    }
-
-    // 2) грузим из API
-    late final ScheduleResponse response;
-    switch (_scheduleType) {
-      case ScheduleType.group:
-        response = await _apiClient.getGroupSchedule(targetValue, _selectedDate);
-        break;
-      case ScheduleType.teacher:
-        response = await _apiClient.getTeacherSchedule(targetValue, _selectedDate);
-        break;
-      case ScheduleType.auditory:
-        response = await _apiClient.getAuditorySchedule(targetValue, _selectedDate);
-        break;
-    }
-
-    // 3) сохраняем в SQLite
-    await _db.saveSchedule(
-      date: dateStr,
-      weekday: response.weekday,
-      lessons: response.lessons,
-      targetType: targetType,
-      targetValue: targetValue,
-    );
-    await LocalNotificationService.instance.rescheduleAll();
-    return response;
-  }
-
-  Future<void> _refreshSchedule() async {
-    final messenger = ScaffoldMessenger.of(context);
-
-    try {
-      final freshDay = await _loadDay(forceRefresh: true);
-
-      if (!mounted) return;
-      setState(() {
-        _dayFuture = Future.value(freshDay);
-      });
-
-      messenger.showSnackBar(const SnackBar(content: Text('Расписание обновлено')));
-    } catch (e) {
-      if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('Не удалось обновить: $e')));
-    }
   }
 
   Future<void> _openCreateNote(Lesson lesson) async {
@@ -246,6 +239,10 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     if (!mounted) return;
 
     if (created == true) {
+      setState(() {
+        _noteSubjectsFuture = _loadNoteSubjects();
+      });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Заметка сохранена')),
       );
@@ -258,15 +255,16 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     if (velocity.abs() < 250) return;
 
     if (velocity < 0) {
-      _changeDate(1);   // свайп влево -> следующий день
+      _changeDate(1);
     } else {
-      _changeDate(-1);  // свайп вправо -> предыдущий день
+      _changeDate(-1);
     }
   }
 
   Future<void> _openScheduleTarget({
     required ScheduleType type,
     required String value,
+    bool addToHistory = true,
   }) async {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return;
@@ -276,13 +274,15 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
 
     if (isSameTarget) return;
 
-    _history.add(
-      _ScheduleNavigationEntry(
-        type: _scheduleType,
-        value: _selectedItem,
-        date: _selectedDate,
-      ),
-    );
+    if (addToHistory) {
+      _history.add(
+        _ScheduleNavigationEntry(
+          type: _scheduleType,
+          value: _selectedItem,
+          date: _selectedDate,
+        ),
+      );
+    }
 
     await CurrentScheduleStorage.save(
       ScheduleTarget(
@@ -290,6 +290,8 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
         value: trimmed,
       ),
     );
+
+    await LocalNotificationService.instance.rescheduleAll();
 
     if (!mounted) return;
 
@@ -321,8 +323,288 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     );
   }
 
+  Future<void> _popScheduleHistory() async {
+    if (_history.isEmpty) return;
 
-  // ---------- UI ----------
+    final previous = _history.removeLast();
+
+    await CurrentScheduleStorage.save(
+      ScheduleTarget(
+        type: previous.type,
+        value: previous.value,
+      ),
+    );
+
+    await LocalNotificationService.instance.rescheduleAll();
+
+    if (!mounted) return;
+
+    setState(() {
+      _scheduleType = previous.type;
+      _selectedItem = previous.value;
+      _selectedDate = previous.date;
+      _dayFuture = null;
+    });
+  }
+
+  Future<void> _openFavoritesSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return _FavoritesBottomSheet(
+          favoritesFuture: _favoritesFuture ?? _db.getFavorites(),
+          activeType: _scheduleType,
+          activeValue: _selectedItem,
+          onSelect: (item) async {
+            Navigator.of(sheetContext).pop();
+            await _openScheduleTarget(
+              type: item.scheduleType,
+              value: item.name,
+              addToHistory: false,
+            );
+            if (!mounted) return;
+            setState(() {
+              _reloadSideData();
+            });
+          },
+          onAdd: () async {
+            Navigator.of(sheetContext).pop();
+            final added = await Navigator.push<bool>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const AddFavoriteScreen(),
+              ),
+            );
+
+            if (!mounted) return;
+
+            if (added == true) {
+              setState(() {
+                _favoritesFuture = _db.getFavorites();
+              });
+            }
+          },
+          onDelete: (item) async {
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder: (dialogContext) {
+                return AlertDialog(
+                  title: const Text('Удаление избранного'),
+                  content: Text('Удалить "${item.name}" из избранного?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: const Text('Отмена'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      child: const Text('Удалить'),
+                    ),
+                  ],
+                );
+              },
+            );
+
+            if (confirmed != true) return;
+
+            await _db.removeFavorite(item.id);
+
+            if (!mounted) return;
+
+            setState(() {
+              _favoritesFuture = _db.getFavorites();
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Удалено: ${item.name}')),
+            );
+          },
+        );
+      },
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _favoritesFuture = _db.getFavorites();
+    });
+  }
+
+  IconData _typeIcon(ScheduleType type) {
+    switch (type) {
+      case ScheduleType.group:
+        return Icons.groups_rounded;
+      case ScheduleType.teacher:
+        return Icons.person_rounded;
+      case ScheduleType.auditory:
+        return Icons.meeting_room_rounded;
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    const months = [
+      '',
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+
+    return '${date.day} ${months[date.month]} ${date.year}';
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  _LessonTiming? _resolveLessonTiming(
+      Lesson lesson,
+      Map<int, ({String start, String end})> slots,
+      ) {
+    final slot = slots[lesson.time];
+    if (slot == null) return null;
+
+    final startParts = slot.start.split(':');
+    final endParts = slot.end.split(':');
+
+    if (startParts.length != 2 || endParts.length != 2) return null;
+
+    final startHour = int.tryParse(startParts[0]);
+    final startMinute = int.tryParse(startParts[1]);
+    final endHour = int.tryParse(endParts[0]);
+    final endMinute = int.tryParse(endParts[1]);
+
+    if (startHour == null ||
+        startMinute == null ||
+        endHour == null ||
+        endMinute == null) {
+      return null;
+    }
+
+    final start = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      startHour,
+      startMinute,
+    );
+
+    final end = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      endHour,
+      endMinute,
+    );
+
+    final isToday = _isSameDay(_selectedDate, _now);
+    final isCurrent =
+        isToday && !_now.isBefore(start) && _now.isBefore(end);
+
+    double progress = 0;
+    if (isCurrent) {
+      final totalMs = end.millisecondsSinceEpoch - start.millisecondsSinceEpoch;
+      final doneMs = _now.millisecondsSinceEpoch - start.millisecondsSinceEpoch;
+      if (totalMs > 0) {
+        progress = (doneMs / totalMs).clamp(0.0, 1.0);
+      }
+    }
+
+    return _LessonTiming(
+      start: start,
+      end: end,
+      isCurrent: isCurrent,
+      progress: progress,
+      startLabel: slot.start,
+      endLabel: slot.end,
+    );
+  }
+
+  _LessonBlockStyle _lessonBlockStyle(
+      BuildContext context,
+      String typeLesson,
+      ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final t = typeLesson.toLowerCase().trim();
+
+    if (t.contains('зач') || t.contains('экз')) {
+      return isDark
+          ? const _LessonBlockStyle(
+        background: Color(0xFF4B2228),
+        border: Color(0xFF8F4A56),
+        accent: Color(0xFFFFB3C1),
+      )
+          : const _LessonBlockStyle(
+        background: Color(0xFFFFE6EA),
+        border: Color(0xFFE7B5BF),
+        accent: Color(0xFF9C2F45),
+      );
+    }
+
+    if (t.contains('лаб')) {
+      return isDark
+          ? const _LessonBlockStyle(
+        background: Color(0xFF3A2D16),
+        border: Color(0xFF7B6335),
+        accent: Color(0xFFFFD98A),
+      )
+          : const _LessonBlockStyle(
+        background: Color(0xFFFFF2D6),
+        border: Color(0xFFE6D09B),
+        accent: Color(0xFF8A6200),
+      );
+    }
+
+    if (t.contains('пр')) {
+      return isDark
+          ? const _LessonBlockStyle(
+        background: Color(0xFF24344A),
+        border: Color(0xFF4A6D98),
+        accent: Color(0xFFB8D5FF),
+      )
+          : const _LessonBlockStyle(
+        background: Color(0xFFE6F0FF),
+        border: Color(0xFFB8CCE8),
+        accent: Color(0xFF2C5EAA),
+      );
+    }
+
+    if (t.contains('л')) {
+      return isDark
+          ? const _LessonBlockStyle(
+        background: Color(0xFF203629),
+        border: Color(0xFF4B7B5E),
+        accent: Color(0xFFBDE8C7),
+      )
+          : const _LessonBlockStyle(
+        background: Color(0xFFE4F5E8),
+        border: Color(0xFFB8D8BF),
+        accent: Color(0xFF2B7642),
+      );
+    }
+
+    return isDark
+        ? const _LessonBlockStyle(
+      background: Color(0xFF2E2E31),
+      border: Color(0xFF55585E),
+      accent: Color(0xFFE6E7EA),
+    )
+        : const _LessonBlockStyle(
+      background: Color(0xFFF1F2F4),
+      border: Color(0xFFD7DADE),
+      accent: Color(0xFF2B2E33),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -330,8 +612,8 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       title: _selectedItem,
       icon: _typeIcon(_scheduleType),
       onRefresh: _refreshSchedule,
-      onTap: null,
-      showDropdownChevron: false,
+      onTap: _openFavoritesSheet,
+      showDropdownChevron: true,
     );
 
     return PopScope(
@@ -354,47 +636,66 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
               onHorizontalDragEnd: _handleHorizontalDragEnd,
               child: FutureBuilder<_DayData>(
                 future: _getDayFuture(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
+                builder: (context, daySnapshot) {
+                  if (daySnapshot.connectionState != ConnectionState.done) {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  if (snapshot.hasError) {
-                    return Center(child: Text('Ошибка: ${snapshot.error}'));
+                  if (daySnapshot.hasError) {
+                    return Center(
+                      child: Text('Ошибка: ${daySnapshot.error}'),
+                    );
                   }
 
-                  final day = snapshot.data!;
+                  final day = daySnapshot.data!;
                   final lessons = day.schedule.lessons;
                   final slots = day.slots;
 
                   if (lessons.isEmpty) {
-                    final scheme = Theme.of(context).colorScheme;
-
                     return Center(
                       child: Text(
                         'Нет занятий',
-                        style: TextStyle(color: scheme.onSurfaceVariant),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     );
                   }
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                    itemCount: lessons.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final lesson = lessons[index];
+                  return FutureBuilder<Set<String>>(
+                    future: _noteSubjectsFuture,
+                    builder: (context, noteSnapshot) {
+                      final noteSubjects = noteSnapshot.data ?? <String>{};
 
-                      return LessonCard(
-                        lesson: lesson,
-                        number: index + 1,
-                        typeColor: _typeColor(context, lesson.typeLesson),
-                        slots: slots,
-                        scheduleType: _scheduleType,
-                        onTap: () => _openCreateNote(lesson),
-                        onTeacherTap: (value) => _openTeacherSchedule(value),
-                        onAuditoryTap: (value) => _openAuditorySchedule(value),
-                        onGroupTap: (value) => _openGroupSchedule(value),
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                        itemCount: lessons.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final lesson = lessons[index];
+                          final timing = _resolveLessonTiming(lesson, slots);
+                          final style = _lessonBlockStyle(
+                            context,
+                            lesson.typeLesson,
+                          );
+
+                          final hasNote = noteSubjects.contains(
+                            _normalizeSubject(lesson.subject),
+                          );
+
+                          return LessonCard(
+                            lesson: lesson,
+                            style: style,
+                            scheduleType: _scheduleType,
+                            timing: timing,
+                            hasNote: hasNote,
+                            onTap: () => _openCreateNote(lesson),
+                            onTeacherTap: (value) => _openTeacherSchedule(value),
+                            onAuditoryTap: (value) =>
+                                _openAuditorySchedule(value),
+                            onGroupTap: (value) => _openGroupSchedule(value),
+                          );
+                        },
                       );
                     },
                   );
@@ -408,7 +709,57 @@ class _ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   }
 }
 
-// ---------------- Widgets ----------------
+class _DayData {
+  final ScheduleResponse schedule;
+  final Map<int, ({String start, String end})> slots;
+
+  const _DayData({
+    required this.schedule,
+    required this.slots,
+  });
+}
+
+class _ScheduleNavigationEntry {
+  final ScheduleType type;
+  final String value;
+  final DateTime date;
+
+  const _ScheduleNavigationEntry({
+    required this.type,
+    required this.value,
+    required this.date,
+  });
+}
+
+class _LessonTiming {
+  final DateTime start;
+  final DateTime end;
+  final bool isCurrent;
+  final double progress;
+  final String startLabel;
+  final String endLabel;
+
+  const _LessonTiming({
+    required this.start,
+    required this.end,
+    required this.isCurrent,
+    required this.progress,
+    required this.startLabel,
+    required this.endLabel,
+  });
+}
+
+class _LessonBlockStyle {
+  final Color background;
+  final Color border;
+  final Color accent;
+
+  const _LessonBlockStyle({
+    required this.background,
+    required this.border,
+    required this.accent,
+  });
+}
 
 class ScheduleTopHeader extends StatelessWidget {
   final String title;
@@ -429,14 +780,9 @@ class ScheduleTopHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final brightness = Theme.of(context).brightness;
-    final headerBg = scheme.primaryContainer;
-    final headerFg = scheme.onPrimaryContainer;
-    final pillBg = headerFg.withValues(alpha: brightness == Brightness.dark ? 0.14 : 0.08);
-    final pillBorder = headerFg.withValues(alpha: brightness == Brightness.dark ? 0.18 : 0.10);
 
     return Material(
-      color: headerBg,
+      color: scheme.primaryContainer,
       child: SafeArea(
         bottom: false,
         child: Padding(
@@ -445,18 +791,24 @@ class ScheduleTopHeader extends StatelessWidget {
             children: [
               Expanded(
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(18),
                   onTap: onTap,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
-                      color: pillBg,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: pillBorder),
+                      color: scheme.onPrimaryContainer.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color:
+                        scheme.onPrimaryContainer.withValues(alpha: 0.10),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        Icon(icon, color: headerFg),
+                        Icon(icon, color: scheme.onPrimaryContainer),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
@@ -466,13 +818,16 @@ class ScheduleTopHeader extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: headerFg,
+                              color: scheme.onPrimaryContainer,
                             ),
                           ),
                         ),
                         if (showDropdownChevron) ...[
                           const SizedBox(width: 8),
-                          Icon(Icons.arrow_drop_down, color: headerFg),
+                          Icon(
+                            Icons.arrow_drop_down_rounded,
+                            color: scheme.onPrimaryContainer,
+                          ),
                         ],
                       ],
                     ),
@@ -483,7 +838,10 @@ class ScheduleTopHeader extends StatelessWidget {
               IconButton(
                 tooltip: 'Обновить',
                 onPressed: onRefresh,
-                icon: Icon(Icons.refresh, color: headerFg),
+                icon: Icon(
+                  Icons.refresh_rounded,
+                  color: scheme.onPrimaryContainer,
+                ),
               ),
             ],
           ),
@@ -511,7 +869,7 @@ class _DatePager extends StatelessWidget {
     return Material(
       color: scheme.surface,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           border: Border(
             bottom: BorderSide(color: scheme.outlineVariant),
@@ -519,15 +877,9 @@ class _DatePager extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: IconButton(
-                onPressed: onPrev,
-                icon: const Icon(Icons.chevron_left),
-              ),
+            _DatePagerButton(
+              icon: Icons.chevron_left_rounded,
+              onTap: onPrev,
             ),
             Expanded(
               child: Center(
@@ -541,15 +893,9 @@ class _DatePager extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: IconButton(
-                onPressed: onNext,
-                icon: const Icon(Icons.chevron_right),
-              ),
+            _DatePagerButton(
+              icon: Icons.chevron_right_rounded,
+              onTap: onNext,
             ),
           ],
         ),
@@ -558,12 +904,41 @@ class _DatePager extends StatelessWidget {
   }
 }
 
+class _DatePagerButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _DatePagerButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon),
+        ),
+      ),
+    );
+  }
+}
+
 class LessonCard extends StatelessWidget {
   final Lesson lesson;
-  final int number;
-  final Color typeColor;
+  final _LessonBlockStyle style;
   final ScheduleType scheduleType;
-  final Map<int, ({String start, String end})>? slots;
+  final _LessonTiming? timing;
+  final bool hasNote;
   final VoidCallback? onTap;
   final ValueChanged<String>? onTeacherTap;
   final ValueChanged<String>? onAuditoryTap;
@@ -572,10 +947,10 @@ class LessonCard extends StatelessWidget {
   const LessonCard({
     super.key,
     required this.lesson,
-    required this.number,
-    required this.typeColor,
+    required this.style,
     required this.scheduleType,
-    this.slots,
+    required this.timing,
+    required this.hasNote,
     this.onTap,
     this.onTeacherTap,
     this.onAuditoryTap,
@@ -586,180 +961,264 @@ class LessonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    String start = '--:--';
-    String end = '--:--';
-
-    if (slots != null) {
-      final slot = slots![lesson.time];
-      start = slot?.start ?? '--:--';
-      end = slot?.end ?? '--:--';
-    } else {
-      const timeSlots = {
-        1: ('08:00', '09:30'),
-        2: ('09:50', '11:20'),
-        3: ('11:40', '13:10'),
-        4: ('13:40', '15:10'),
-        5: ('15:20', '16:50'),
-        6: ('17:00', '18:30'),
-        7: ('18:40', '20:10'),
-      };
-      final slot = timeSlots[lesson.time];
-      start = slot?.$1 ?? '--:--';
-      end = slot?.$2 ?? '--:--';
-    }
-
     final showTeacher = scheduleType != ScheduleType.teacher;
     final showAuditory = scheduleType != ScheduleType.auditory;
     final showGroups = scheduleType != ScheduleType.group;
+    final isCurrent = timing?.isCurrent ?? false;
 
     return Material(
-      color: scheme.surface,
-      elevation: 0.6,
-      surfaceTintColor: scheme.primary,
-      borderRadius: BorderRadius.circular(16),
+      color: style.background,
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: scheme.outlineVariant),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: scheme.surfaceContainerHighest,
-                  border: Border.all(color: scheme.outlineVariant),
-                ),
-                child: Center(
-                  child: Text(
-                    '$start\n-\n$end',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurface,
+        child: Stack(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: style.border),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _LessonTimeCircle(
+                    startText: timing?.startLabel ?? '--:--',
+                    endText: timing?.endLabel ?? '--:--',
+                    isCurrent: isCurrent,
+                    progress: timing?.progress ?? 0,
+                    accent: style.accent,
+                    borderColor: style.border,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                lesson.subject,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            if (hasNote) ...[
+                              const SizedBox(width: 8),
+                              Icon(
+                                Icons.sticky_note_2_rounded,
+                                size: 18,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          lesson.typeLesson,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: style.accent,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        if (showGroups && lesson.group.isNotEmpty) ...[
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Группы:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              ...lesson.group.map(
+                                    (group) => _LessonLinkChip(
+                                  text: group,
+                                  onTap: () => onGroupTap?.call(group),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Преподаватель:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              _LessonLinkChip(
+                                text: lesson.teacher.trim(),
+                                onTap: () =>
+                                    onTeacherTap?.call(lesson.teacher.trim()),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                        if (showAuditory && lesson.auditory.trim().isNotEmpty)
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Аудитория:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              _LessonLinkChip(
+                                text: lesson.auditory.trim(),
+                                onTap: () =>
+                                    onAuditoryTap?.call(lesson.auditory.trim()),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isCurrent)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    margin: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: style.accent,
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      lesson.subject,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      lesson.typeLesson,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: typeColor,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (showGroups && lesson.group.isNotEmpty) ...[
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            'Группы:',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          ...lesson.group.map(
-                                (group) => _LessonLinkText(
-                              text: group,
-                              onTap: () => onGroupTap?.call(group),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                    ],
-                    if (showTeacher && lesson.teacher.trim().isNotEmpty) ...[
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            'Преподаватель:',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          _LessonLinkText(
-                            text: lesson.teacher.trim(),
-                            onTap: () => onTeacherTap?.call(lesson.teacher.trim()),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                    ],
-                    if (showAuditory && lesson.auditory.trim().isNotEmpty)
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            'Аудитория:',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          _LessonLinkText(
-                            text: lesson.auditory.trim(),
-                            onTap: () => onAuditoryTap?.call(lesson.auditory.trim()),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '№$number',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
+class _LessonTimeCircle extends StatelessWidget {
+  final String startText;
+  final String endText;
+  final bool isCurrent;
+  final double progress;
+  final Color accent;
+  final Color borderColor;
 
-class _LessonLinkText extends StatelessWidget {
+  const _LessonTimeCircle({
+    required this.startText,
+    required this.endText,
+    required this.isCurrent,
+    required this.progress,
+    required this.accent,
+    required this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: 74,
+      height: 74,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 74,
+            height: 74,
+            child: CircularProgressIndicator(
+              value: 1,
+              strokeWidth: 5,
+              valueColor: AlwaysStoppedAnimation<Color>(borderColor),
+              backgroundColor: Colors.transparent,
+            ),
+          ),
+          if (isCurrent)
+            SizedBox(
+              width: 74,
+              height: 74,
+              child: CircularProgressIndicator(
+                value: progress,
+                strokeWidth: 5,
+                valueColor: AlwaysStoppedAnimation<Color>(accent),
+                backgroundColor: Colors.transparent,
+              ),
+            ),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: scheme.surface.withValues(alpha: 0.70),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  startText,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                Container(
+                  width: 6,
+                  height: 6,
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent,
+                  ),
+                ),
+                Text(
+                  endText,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LessonLinkChip extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
 
-  const _LessonLinkText({
+  const _LessonLinkChip({
     required this.text,
     required this.onTap,
   });
@@ -774,7 +1233,7 @@ class _LessonLinkText extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
+          color: scheme.surface.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
@@ -790,3 +1249,100 @@ class _LessonLinkText extends StatelessWidget {
   }
 }
 
+class _FavoritesBottomSheet extends StatelessWidget {
+  final Future<List<FavoriteItem>> favoritesFuture;
+  final ScheduleType activeType;
+  final String activeValue;
+  final ValueChanged<FavoriteItem> onSelect;
+  final Future<void> Function() onAdd;
+  final Future<void> Function(FavoriteItem item) onDelete;
+
+  const _FavoritesBottomSheet({
+    required this.favoritesFuture,
+    required this.activeType,
+    required this.activeValue,
+    required this.onSelect,
+    required this.onAdd,
+    required this.onDelete,
+  });
+
+  IconData _iconFor(ScheduleType type) {
+    switch (type) {
+      case ScheduleType.group:
+        return Icons.groups_rounded;
+      case ScheduleType.teacher:
+        return Icons.person_rounded;
+      case ScheduleType.auditory:
+        return Icons.meeting_room_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: FutureBuilder<List<FavoriteItem>>(
+        future: favoritesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const SizedBox(
+              height: 240,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          final favorites = snapshot.data ?? [];
+
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ListTile(
+                  title: Text(
+                    'Избранные расписания',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final item in favorites)
+                        ListTile(
+                          leading: Icon(_iconFor(item.scheduleType)),
+                          title: Text(item.name),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (item.scheduleType == activeType &&
+                                  item.name == activeValue)
+                                const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Colors.green,
+                                ),
+                              IconButton(
+                                tooltip: 'Удалить',
+                                onPressed: () => onDelete(item),
+                                icon: const Icon(Icons.delete_outline_rounded),
+                              ),
+                            ],
+                          ),
+                          onTap: () => onSelect(item),
+                        ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.add_rounded),
+                        title: const Text('Добавить в избранное'),
+                        onTap: onAdd,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}

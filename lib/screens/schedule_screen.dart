@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/schedule_target.dart';
 import '../utils/current_schedule_storage.dart';
 import '../views/schedule_explorer_view.dart';
@@ -12,6 +13,7 @@ class ScheduleScreen extends StatefulWidget {
 
 class ScheduleScreenState extends State<ScheduleScreen> {
   late Future<ScheduleTarget?> _initialTargetFuture;
+  final _explorerKey = GlobalKey<ScheduleExplorerViewState>();
 
   @override
   void initState() {
@@ -20,17 +22,26 @@ class ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   Future<ScheduleTarget?> _loadInitialTarget() async {
-    final target = await CurrentScheduleStorage.load();
-    debugPrint(
-      '📂 Current schedule: '
-          'type=${target?.type.name}, value=${target?.value}',
-    );
-    return target;
+    return CurrentScheduleStorage.load();
   }
 
   Future<void> reload() async {
+    final target = await CurrentScheduleStorage.load();
+
+    if (!mounted) return;
+
+    final currentSnapshot = await _initialTargetFuture;
+
+    final sameTarget = currentSnapshot?.type == target?.type &&
+        currentSnapshot?.value == target?.value;
+
+    if (sameTarget) {
+      await _explorerKey.currentState?.refreshExternalData();
+      return;
+    }
+
     setState(() {
-      _initialTargetFuture = _loadInitialTarget();
+      _initialTargetFuture = Future.value(target);
     });
   }
 
@@ -51,21 +62,22 @@ class ScheduleScreenState extends State<ScheduleScreen> {
 
         final target = snapshot.data;
 
-        if (target != null) {
-          return ScheduleExplorerView(
-            initialType: target.type,
-            initialValue: target.value,
+        if (target == null) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Выберите расписание через выпадающий список или добавьте его в избранное',
+                textAlign: TextAlign.center,
+              ),
+            ),
           );
         }
 
-        return const Center(
-          child: Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              'Выберите расписание в "Доп. возможностях"',
-              textAlign: TextAlign.center,
-            ),
-          ),
+        return ScheduleExplorerView(
+          key: _explorerKey,
+          initialType: target.type,
+          initialValue: target.value,
         );
       },
     );
