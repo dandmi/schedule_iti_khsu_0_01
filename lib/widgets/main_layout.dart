@@ -30,8 +30,8 @@ class MainLayout extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: scheme.surfaceContainer,
-        foregroundColor: scheme.onSurface,
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
         title: Text(appTitle),
