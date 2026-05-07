@@ -183,7 +183,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
 
         return response;
       } catch (_) {
-        // ниже fallback в БД
+        // fallback ниже
       }
     }
 
@@ -193,7 +193,13 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       targetValue: targetValue,
     );
 
-    if (cachedLessons.isNotEmpty) {
+    final hasSnapshot = await _db.hasScheduleSnapshot(
+      date: dateStr,
+      targetType: targetType,
+      targetValue: targetValue,
+    );
+
+    if (hasSnapshot) {
       return ScheduleResponse(
         weekday: _selectedDate.weekday,
         weekNumber: 0,
@@ -202,7 +208,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     }
 
     if (!hasInternet) {
-      throw Exception('Нет подключения к интернету. Расписание не загружено.');
+      throw Exception('Нет подключения к интернету и нет сохранённых данных на эту дату.');
     }
 
     throw Exception('Не удалось обновить расписание.');

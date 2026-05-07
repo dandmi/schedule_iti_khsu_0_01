@@ -359,17 +359,23 @@ class LocalNotificationService {
       }
     }
 
+    final hasSnapshot = await _db.hasScheduleSnapshot(
+      date: dateStr,
+      targetType: target.type.name,
+      targetValue: target.value,
+    );
+
+    if (!hasSnapshot) {
+      return null;
+    }
+
     final cached = await _db.getSchedule(
       date: dateStr,
       targetType: target.type.name,
       targetValue: target.value,
     );
 
-    if (cached.isNotEmpty) {
-      return cached;
-    }
-
-    return null;
+    return cached;
   }
 
   NotificationDetails _lessonNotificationDetails() {

@@ -36,7 +36,7 @@ class DatabaseHelper {
       debugPrint('Путь к БД: $path');
       final db = await openDatabase(
         path,
-        version: 3,
+        version: 4,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
@@ -78,6 +78,18 @@ class DatabaseHelper {
         UNIQUE(date, slot_id, target_type, target_value) ON CONFLICT REPLACE
       )
     ''');
+
+    await db.execute('''
+  CREATE TABLE schedule_snapshot (
+    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_value TEXT NOT NULL,
+    has_data INTEGER NOT NULL,
+    synced_at INTEGER NOT NULL,
+    UNIQUE(date, target_type, target_value) ON CONFLICT REPLACE
+  )
+''');
 
     // 3. Избранные
     await db.execute('''
@@ -133,6 +145,20 @@ class DatabaseHelper {
       await _addColumnIfMissing(db, 'note', 'subject', 'TEXT');
       await _addColumnIfMissing(db, 'note', 'due_at', 'INTEGER');
     }
+
+    if (oldVersion < 4) {
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS schedule_snapshot (
+        snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_value TEXT NOT NULL,
+        has_data INTEGER NOT NULL,
+        synced_at INTEGER NOT NULL,
+        UNIQUE(date, target_type, target_value) ON CONFLICT REPLACE
+      )
+    ''');
+    }
   }
 
   Future<void> _addColumnIfMissing(
@@ -154,7 +180,7 @@ class DatabaseHelper {
   // В классе DatabaseHelper
 
   Future<void> saveSchedule({
-    required String date, // формат: '2026-02-06'
+    required String date,
     required int weekday,
     required List<Lesson> lessons,
     required String targetType,
@@ -162,14 +188,12 @@ class DatabaseHelper {
   }) async {
     final db = await database;
 
-    // Удалим старые занятия для этой даты и цели (чтобы избежать дублей)
     await db.delete(
       'lesson',
       where: 'date = ? AND target_type = ? AND target_value = ?',
       whereArgs: [date, targetType, targetValue],
     );
 
-    // Вставим новые
     for (final lesson in lessons) {
       await db.insert('lesson', {
         'date': date,
@@ -184,6 +208,18 @@ class DatabaseHelper {
         'target_value': targetValue,
       });
     }
+
+    await db.insert(
+      'schedule_snapshot',
+      {
+        'date': date,
+        'target_type': targetType,
+        'target_value': targetValue,
+        'has_data': lessons.isNotEmpty ? 1 : 0,
+        'synced_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Lesson>> getSchedule({
@@ -259,6 +295,44 @@ class DatabaseHelper {
     return maps.map((row) => row['name'] as String).toList();
   }
 
+  Future<bool> hasScheduleSnapshot({
+    required String date,
+    required String targetType,
+    required String targetValue,
+  }) async {
+    final db = await database;
+
+    final maps = await db.query(
+      'schedule_snapshot',
+      columns: ['snapshot_id'],
+      where: 'date = ? AND target_type = ? AND target_value = ?',
+      whereArgs: [date, targetType, targetValue],
+      limit: 1,
+    );
+
+    return maps.isNotEmpty;
+  }
+
+  Future<bool?> getScheduleSnapshotHasData({
+    required String date,
+    required String targetType,
+    required String targetValue,
+  }) async {
+    final db = await database;
+
+    final maps = await db.query(
+      'schedule_snapshot',
+      columns: ['has_data'],
+      where: 'date = ? AND target_type = ? AND target_value = ?',
+      whereArgs: [date, targetType, targetValue],
+      limit: 1,
+    );
+
+    if (maps.isEmpty) return null;
+
+    final raw = maps.first['has_data'] as int? ?? 0;
+    return raw == 1;
+  }
 
 
   // ===== NOTES =====
