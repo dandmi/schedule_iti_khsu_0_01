@@ -1,12 +1,15 @@
 package com.example.schedule_iti_khsu_0_01
 
-import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import es.antonborri.home_widget.HomeWidgetPlugin
 import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ScheduleTodayWidgetFactory(
     private val context: Context,
@@ -14,8 +17,7 @@ class ScheduleTodayWidgetFactory(
 ) : RemoteViewsService.RemoteViewsFactory {
 
     private val items = mutableListOf<Pair<String, String>>()
-    private val appWidgetId: Int =
-        intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+    private val forcedDateKey: String? = intent.getStringExtra("date_key")
 
     override fun onCreate() {
         loadData()
@@ -55,22 +57,33 @@ class ScheduleTodayWidgetFactory(
         items.clear()
 
         val prefs = HomeWidgetPlugin.getData(context)
-        val rawJson = prefs.getString("schedule_widget_items_json", "[]") ?: "[]"
+        val rawJson = prefs.getString("schedule_widget_payload_json", "{}") ?: "{}"
+        val dateKey = forcedDateKey ?: currentDateKey()
 
         try {
-            val array = JSONArray(rawJson)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val title = obj.optString("title", "")
-                val subtitle = obj.optString("subtitle", "")
-                items.add(title to subtitle)
+            val root = JSONObject(rawJson)
+
+            if (root.has(dateKey)) {
+                val dayObject = root.getJSONObject(dateKey)
+                val array = dayObject.optJSONArray("items") ?: JSONArray()
+
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val title = obj.optString("title", "")
+                    val subtitle = obj.optString("subtitle", "")
+                    items.add(title to subtitle)
+                }
             }
         } catch (_: Exception) {
-            // ignore parse errors
         }
 
         if (items.isEmpty()) {
-            items.add("Нет занятий" to "")
+            items.add("Откройте приложение для обновления виджета" to "")
         }
+    }
+
+    private fun currentDateKey(): String {
+        val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        return formatter.format(Date())
     }
 }

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:home_widget/home_widget.dart';
@@ -7,7 +8,6 @@ import '../database/database_helper.dart';
 import '../models/schedule_response.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
-import 'dart:convert';
 
 class ScheduleWidgetService {
   ScheduleWidgetService._internal();
@@ -16,6 +16,7 @@ class ScheduleWidgetService {
   ScheduleWidgetService._internal();
 
   static const String providerName = 'ScheduleTodayWidgetProvider';
+  static const int preloadDays = 7;
 
   final ApiClient _apiClient = ApiClient();
   final DatabaseHelper _db = DatabaseHelper();
@@ -30,27 +31,46 @@ class ScheduleWidgetService {
       return 'Сначала выберите текущее расписание';
     }
 
-    final today = DateTime.now();
-    final schedule = await _loadTodaySchedule(
-      targetType: target.type,
-      targetValue: target.value,
-      date: today,
-    );
+    final now = DateTime.now();
     final slots = await _db.getTimeSlots();
 
-    final title = 'Сегодня • ${target.value}';
-    final dateText = _formatDate(today);
-    final itemsJson = jsonEncode(
-      _buildWidgetItems(
-        schedule: schedule,
-        slots: slots,
-        scheduleType: target.type,
-      ),
-    );
+    final payload = <String, dynamic>{};
 
-    await HomeWidget.saveWidgetData<String>('schedule_widget_title', title);
-    await HomeWidget.saveWidgetData<String>('schedule_widget_date', dateText);
-    await HomeWidget.saveWidgetData<String>('schedule_widget_items_json', itemsJson);
+    for (int i = 0; i < preloadDays; i++) {
+      final date = DateTime(now.year, now.month, now.day + i);
+
+      final schedule = await _loadScheduleForDay(
+        targetType: target.type,
+        targetValue: target.value,
+        date: date,
+      );
+
+      payload[_dateStr(date)] = {
+        'dateLabel': _formatDate(date),
+        'items': _buildWidgetItems(
+          schedule: schedule,
+          slots: slots,
+          scheduleType: target.type,
+        ),
+      };
+    }
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_name',
+      target.value,
+    );
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_type',
+      target.type.name,
+    );
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_payload_json',
+      jsonEncode(payload),
+    );
+    await HomeWidget.saveWidgetData<int>(
+      'schedule_widget_generated_at',
+      DateTime.now().millisecondsSinceEpoch,
+    );
 
     await HomeWidget.updateWidget(
       name: providerName,
@@ -77,50 +97,48 @@ class ScheduleWidgetService {
     return 'Виджет обновлён';
   }
 
-  Future<ScheduleResponse> _loadTodaySchedule({
+  Future<ScheduleResponse> _loadScheduleForDay({
     required ScheduleType targetType,
     required String targetValue,
     required DateTime date,
   }) async {
     final dateStr = _dateStr(date);
 
-    try {
-      late final ScheduleResponse response;
+    final hasInternet = await _apiClient.hasInternetConnection();
 
-      switch (targetType) {
-        case ScheduleType.group:
-          response = await _apiClient.getGroupSchedule(targetValue, date);
-          break;
-        case ScheduleType.teacher:
-          response = await _apiClient.getTeacherSchedule(targetValue, date);
-          break;
-        case ScheduleType.auditory:
-          response = await _apiClient.getAuditorySchedule(targetValue, date);
-          break;
+    if (hasInternet) {
+      try {
+        final response = await _apiClient.fetchSchedule(
+          type: targetType,
+          value: targetValue,
+          date: date,
+        );
+
+        await _db.saveSchedule(
+          date: dateStr,
+          weekday: response.weekday,
+          lessons: response.lessons,
+          targetType: targetType.name,
+          targetValue: targetValue,
+        );
+
+        return response;
+      } catch (_) {
+        // fallback to cache
       }
-
-      await _db.saveSchedule(
-        date: dateStr,
-        weekday: response.weekday,
-        lessons: response.lessons,
-        targetType: targetType.name,
-        targetValue: targetValue,
-      );
-
-      return response;
-    } catch (_) {
-      final cached = await _db.getSchedule(
-        date: dateStr,
-        targetType: targetType.name,
-        targetValue: targetValue,
-      );
-
-      return ScheduleResponse(
-        weekday: date.weekday,
-        weekNumber: 0,
-        lessons: cached,
-      );
     }
+
+    final cached = await _db.getSchedule(
+      date: dateStr,
+      targetType: targetType.name,
+      targetValue: targetValue,
+    );
+
+    return ScheduleResponse(
+      weekday: date.weekday,
+      weekNumber: 0,
+      lessons: cached,
+    );
   }
 
   List<Map<String, String>> _buildWidgetItems({
