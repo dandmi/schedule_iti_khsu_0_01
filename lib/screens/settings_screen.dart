@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../utils/schedule_widget_service.dart';
 import 'notification_settings_screen.dart';
+import '../database/database_helper.dart';
+import '../utils/app_refresh_bus.dart';
 
 class SettingsScreen extends StatelessWidget {
   final ThemeMode themeMode;
@@ -32,6 +34,44 @@ class SettingsScreen extends StatelessWidget {
         SnackBar(content: Text('Не удалось создать виджет: $e')),
       );
     }
+  }
+
+  Future<void> _clearDownloadedSchedules(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Очистить загруженные данные?'),
+          content: const Text(
+            'Будут удалены сохранённые расписания. Избранное, заметки и настройки сохранятся.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Очистить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    await DatabaseHelper().clearDownloadedSchedules();
+
+    AppRefreshBus.markScheduleChanged();
+
+    if (!context.mounted) return;
+
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Загруженные расписания удалены')),
+    );
   }
 
   void _showNotImplemented(BuildContext context, String title) {
@@ -158,6 +198,23 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Поделиться приложением'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showNotImplemented(context, 'Порекомендовать друзьям'),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined),
+            title: const Text('Очистить загруженные данные'),
+            subtitle: const Text('Удалить сохранённые расписания'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _clearDownloadedSchedules(context),
           ),
         ),
       ],

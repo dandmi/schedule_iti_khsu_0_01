@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -22,6 +20,8 @@ class LocalNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin =
   FlutterLocalNotificationsPlugin();
+
+  static const int notificationPreloadDays = 7;
 
   final DatabaseHelper _db = DatabaseHelper();
   final ApiClient _api = ApiClient();
@@ -60,9 +60,7 @@ class LocalNotificationService {
     try {
       final timezoneName = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(timezoneName));
-    } catch (e, stack) {
-      debugPrint('⏰ Timezone config failed: $e\n$stack');
-    }
+    } catch (_) {}
   }
 
   Future<void> requestPermissions() async {
@@ -79,9 +77,7 @@ class LocalNotificationService {
         if (canExact != true) {
           try {
             await android?.requestExactAlarmsPermission();
-          } catch (e, stack) {
-            debugPrint('⏰ requestExactAlarmsPermission failed: $e\n$stack');
-          }
+          } catch (_) {}
         }
       }
 
@@ -104,9 +100,7 @@ class LocalNotificationService {
           sound: true,
         );
       }
-    } catch (e, stack) {
-      debugPrint('⏰ requestPermissions failed: $e\n$stack');
-    }
+    } catch (_) {}
   }
 
   Future<void> rescheduleAll() async {
@@ -132,14 +126,12 @@ class LocalNotificationService {
       }
 
       if (settings.tomorrowSummaryEnabled) {
-        await _scheduleTomorrowSummaryReminder(
+        await _scheduleTomorrowSummaryReminders(
           hour: settings.tomorrowSummaryHour,
           minute: settings.tomorrowSummaryMinute,
         );
       }
-    } catch (e, stack) {
-      debugPrint('⏰ rescheduleAll failed: $e\n$stack');
-    }
+    } catch (_) {}
   }
 
   Future<AndroidScheduleMode> _resolveAndroidScheduleMode() async {
@@ -152,9 +144,7 @@ class LocalNotificationService {
       if (canExact == true) {
         return AndroidScheduleMode.exactAllowWhileIdle;
       }
-    } catch (e, stack) {
-      debugPrint('⏰ canScheduleExactNotifications failed: $e\n$stack');
-    }
+    } catch (_) {}
 
     return AndroidScheduleMode.inexactAllowWhileIdle;
   }
@@ -199,11 +189,7 @@ class LocalNotificationService {
           androidScheduleMode: scheduleMode,
           payload: 'note:${note.id ?? 0}',
         );
-      } on PlatformException catch (e, stack) {
-        debugPrint('⏰ Note zonedSchedule PlatformException: $e\n$stack');
-      } catch (e, stack) {
-        debugPrint('⏰ Note zonedSchedule failed: $e\n$stack');
-      }
+      } catch (_) {}
     }
   }
 
@@ -254,15 +240,11 @@ class LocalNotificationService {
           androidScheduleMode: scheduleMode,
           payload: 'lesson:${lesson.lessonId}',
         );
-      } on PlatformException catch (e, stack) {
-        debugPrint('⏰ Lesson zonedSchedule PlatformException: $e\n$stack');
-      } catch (e, stack) {
-        debugPrint('⏰ Lesson zonedSchedule failed: $e\n$stack');
-      }
+      } catch (_) {}
     }
   }
 
-  Future<void> _scheduleTomorrowSummaryReminder({
+  Future<void> _scheduleTomorrowSummaryReminders({
     required int hour,
     required int minute,
   }) async {
@@ -270,62 +252,60 @@ class LocalNotificationService {
     if (currentTarget == null) return;
 
     final now = DateTime.now();
-    var trigger = DateTime(now.year, now.month, now.day, hour, minute);
+    var firstTrigger = DateTime(now.year, now.month, now.day, hour, minute);
 
-    if (!trigger.isAfter(now)) {
-      trigger = trigger.add(const Duration(days: 1));
-    }
-
-    final targetDate = DateTime(
-      trigger.year,
-      trigger.month,
-      trigger.day,
-    ).add(const Duration(days: 1));
-
-    final lessons = await _loadLessonsForTargetDate(
-      target: currentTarget,
-      date: targetDate,
-    );
-
-    if (lessons == null) {
-      debugPrint('📅 Нет данных для уведомления "есть ли завтра занятия"');
-      return;
+    if (!firstTrigger.isAfter(now)) {
+      firstTrigger = firstTrigger.add(const Duration(days: 1));
     }
 
     final scheduleMode = await _resolveAndroidScheduleMode();
-    final scheduledDate = tz.TZDateTime.from(trigger, tz.local);
+    final slots = await _db.getTimeSlots();
 
-    final title = 'Расписание на завтра';
-    late final String body;
+    for (var offset = 0; offset < notificationPreloadDays; offset++) {
+      final trigger = firstTrigger.add(Duration(days: offset));
+      final targetDate = DateTime(
+        trigger.year,
+        trigger.month,
+        trigger.day,
+      ).add(const Duration(days: 1));
 
-    if (lessons.isEmpty) {
-      body = '${currentTarget.value}: завтра занятий нет';
-    } else {
-      final slots = await _db.getTimeSlots();
-      lessons.sort((a, b) => a.time.compareTo(b.time));
-      final firstSlot = slots[lessons.first.time];
-      final firstStart = firstSlot?.start ?? '--:--';
-
-      body =
-      '${currentTarget.value}: ${lessons.length} ${_pairsWord(lessons.length)}, первая в $firstStart';
-    }
-
-    try {
-      await _plugin.zonedSchedule(
-        id: _stableId(
-          'tomorrow-summary:${currentTarget.type.name}:${currentTarget.value}:${_dateStr(targetDate)}',
-        ),
-        title: title,
-        body: body,
-        scheduledDate: scheduledDate,
-        notificationDetails: _tomorrowSummaryNotificationDetails(),
-        androidScheduleMode: scheduleMode,
-        payload: 'tomorrow-summary',
+      final lessons = await _loadLessonsForTargetDate(
+        target: currentTarget,
+        date: targetDate,
       );
-    } on PlatformException catch (e, stack) {
-      debugPrint('📅 Tomorrow summary PlatformException: $e\n$stack');
-    } catch (e, stack) {
-      debugPrint('📅 Tomorrow summary failed: $e\n$stack');
+
+      if (lessons == null) {
+        continue;
+      }
+
+      final scheduledDate = tz.TZDateTime.from(trigger, tz.local);
+      final title = 'Расписание на завтра';
+      late final String body;
+
+      if (lessons.isEmpty) {
+        body = '${currentTarget.value}: завтра занятий нет';
+      } else {
+        lessons.sort((a, b) => a.time.compareTo(b.time));
+        final firstSlot = slots[lessons.first.time];
+        final firstStart = firstSlot?.start ?? '--:--';
+
+        body =
+            '${currentTarget.value}: ${lessons.length} ${_pairsWord(lessons.length)}, первая в $firstStart';
+      }
+
+      try {
+        await _plugin.zonedSchedule(
+          id: _stableId(
+            'tomorrow-summary:${currentTarget.type.name}:${currentTarget.value}:${_dateStr(trigger)}:${_dateStr(targetDate)}',
+          ),
+          title: title,
+          body: body,
+          scheduledDate: scheduledDate,
+          notificationDetails: _tomorrowSummaryNotificationDetails(),
+          androidScheduleMode: scheduleMode,
+          payload: 'tomorrow-summary:${_dateStr(targetDate)}',
+        );
+      } catch (_) {}
     }
   }
 
@@ -354,9 +334,7 @@ class LocalNotificationService {
         );
 
         return response.lessons;
-      } catch (e, stack) {
-        debugPrint('📅 Failed to fetch tomorrow summary data: $e\n$stack');
-      }
+      } catch (_) {}
     }
 
     final hasSnapshot = await _db.hasScheduleSnapshot(

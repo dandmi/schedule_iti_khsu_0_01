@@ -5,8 +5,6 @@ class Note {
   final String? subject;
   final int createdAt;
   final int? dueAt;
-  final int? lessonId;
-
   Note({
     this.id,
     this.title,
@@ -14,7 +12,6 @@ class Note {
     this.subject,
     required this.createdAt,
     this.dueAt,
-    this.lessonId,
   });
 
   bool get hasDueAt => dueAt != null;
@@ -27,7 +24,6 @@ class Note {
       subject: map['subject'] as String?,
       createdAt: map['created_at'] as int? ?? 0,
       dueAt: map['due_at'] as int?,
-      lessonId: map['lesson_id'] as int?,
     );
   }
 
@@ -38,6 +34,5 @@ class Note {
     'subject': subject,
     'created_at': createdAt,
     'due_at': dueAt,
-    'lesson_id': lessonId,
   };
 }

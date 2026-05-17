@@ -1,4 +1,4 @@
-package com.example.schedule_iti_khsu_0_01
+package ru.scheduleitikhsu.app
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager

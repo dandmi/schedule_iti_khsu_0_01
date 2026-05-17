@@ -10,9 +10,7 @@ void main() async {
     await LocalNotificationService.instance.initialize();
     await LocalNotificationService.instance.requestPermissions();
     await LocalNotificationService.instance.rescheduleAll();
-  } catch (e, stack) {
-    debugPrint('❌ Notification bootstrap failed: $e\n$stack');
-  }
+  } catch (_) {}
 
   runApp(const MyApp());
 }

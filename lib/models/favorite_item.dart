@@ -3,7 +3,7 @@ import '../utils/schedule_type.dart';
 class FavoriteItem {
   final int id;
   final String name;
-  final String type; // 'group', 'teacher', 'auditory'
+  final String type;
 
   FavoriteItem({required this.id, required this.name, required this.type});
 
@@ -11,15 +11,18 @@ class FavoriteItem {
     return FavoriteItem(
       id: map['id'] as int,
       name: map['name'] as String,
-      type: map['type'] as String, // ← должно быть 'group', 'teacher' или 'auditory'
+      type: map['type'] as String,
     );
   }
 
   ScheduleType get scheduleType {
     switch (type) {
-      case 'group': return ScheduleType.group;
-      case 'teacher': return ScheduleType.teacher;
-      case 'auditory': return ScheduleType.auditory;
+      case 'group':
+        return ScheduleType.group;
+      case 'teacher':
+        return ScheduleType.teacher;
+      case 'auditory':
+        return ScheduleType.auditory;
       default: throw Exception('Неизвестный тип: $type');
     }
   }

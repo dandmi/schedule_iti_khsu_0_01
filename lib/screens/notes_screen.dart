@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+
 import '../database/database_helper.dart';
 import '../models/note.dart';
-import 'note_edit_screen.dart';
-import '../utils/local_notification_service.dart';
 import '../utils/app_refresh_bus.dart';
+import '../utils/local_notification_service.dart';
+import 'note_edit_screen.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -14,11 +15,6 @@ class NotesScreen extends StatefulWidget {
 
 class NotesScreenState extends State<NotesScreen> {
   final _db = DatabaseHelper();
-
-  void _reload() {
-    if (!mounted) return;
-    setState(() {});
-  }
 
   @override
   void initState() {
@@ -32,17 +28,17 @@ class NotesScreenState extends State<NotesScreen> {
     super.dispose();
   }
 
+  Future<void> reload() async => _reload();
+
+  Future<void> openCreate() async => _openCreate();
+
   void _onExternalNotesChanged() {
     _reload();
   }
 
-  Future<void> reload() async => _reload();
-
-  String _two(int value) => value.toString().padLeft(2, '0');
-
-  String _formatDateTime(int millis) {
-    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${_two(dt.day)}.${_two(dt.month)}.${dt.year} ${_two(dt.hour)}:${_two(dt.minute)}';
+  void _reload() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _openCreate() async {
@@ -64,13 +60,41 @@ class NotesScreenState extends State<NotesScreen> {
   Future<void> _delete(Note note) async {
     if (note.id == null) return;
 
+    final title = (note.title ?? '').trim();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Удалить заметку?'),
+          content: Text(
+            title.isEmpty
+                ? 'Заметка будет удалена без возможности восстановления.'
+                : 'Заметка «$title» будет удалена без возможности восстановления.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
     await _db.deleteNote(note.id!);
 
     try {
       await LocalNotificationService.instance.rescheduleAll();
-    } catch (e, stack) {
-      debugPrint('❌ Failed to reschedule after delete: $e\n$stack');
-    }
+    } catch (_) {}
 
     AppRefreshBus.markNotesChanged();
     AppRefreshBus.markScheduleChanged();
@@ -78,7 +102,12 @@ class NotesScreenState extends State<NotesScreen> {
     _reload();
   }
 
-  Future<void> openCreate() async => _openCreate();
+  String _two(int value) => value.toString().padLeft(2, '0');
+
+  String _formatDateTime(int millis) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(millis);
+    return '${_two(dt.day)}.${_two(dt.month)}.${dt.year} ${_two(dt.hour)}:${_two(dt.minute)}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,12 +137,12 @@ class NotesScreenState extends State<NotesScreen> {
             final n = notes[i];
 
             final title =
-            (n.title ?? '').trim().isEmpty ? '(без названия)' : n.title!.trim();
+                (n.title ?? '').trim().isEmpty ? '(без названия)' : n.title!.trim();
 
             final desc = (n.description ?? '').trim();
             final subject = (n.subject ?? '').trim();
             final dueText =
-            n.dueAt != null ? 'Срок: ${_formatDateTime(n.dueAt!)}' : '';
+                n.dueAt != null ? 'Срок: ${_formatDateTime(n.dueAt!)}' : '';
 
             final subtitleParts = <String>[];
             if (subject.isNotEmpty) subtitleParts.add('Предмет: $subject');
@@ -129,15 +158,16 @@ class NotesScreenState extends State<NotesScreen> {
               subtitle: subtitleParts.isEmpty
                   ? null
                   : Text(
-                subtitleParts.join('\n'),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () => _openEdit(n),
+                      subtitleParts.join('\n'),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
               trailing: IconButton(
+                tooltip: 'Удалить',
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () => _delete(n),
               ),
+              onTap: () => _openEdit(n),
             );
           },
         );

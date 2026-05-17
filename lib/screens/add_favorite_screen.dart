@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:schedule_iti_khsu_0_01/api/api_client.dart';
-import 'package:schedule_iti_khsu_0_01/database/database_helper.dart';
-import 'package:schedule_iti_khsu_0_01/utils/schedule_type.dart';
+import '../api/api_client.dart';
+import '../database/database_helper.dart';
+import '../utils/schedule_type.dart';
 import '../models/schedule_target.dart';
 
 class _SuggestionItem {
@@ -123,7 +123,6 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
         final response = await _apiClient.search(variant);
         responses.add(response);
       } catch (_) {
-        // Один вариант может не сработать — продолжаем с другими
       }
     }
 
@@ -135,7 +134,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
   }
 
   Future<void> _performSearch(String query) async {
-    final messenger = ScaffoldMessenger.of(context); // берём ДО await
+    final messenger = ScaffoldMessenger.of(context);
     final q = query.trim();
 
     if (q.isEmpty) {
@@ -159,16 +158,16 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
 
       if (!mounted || currentRequest != _requestId) return;
 
-      // courses игнорируем полностью
-      List<_SuggestionItem> groups =
-      result.names.map((s) => _SuggestionItem(type: ScheduleType.group, value: s)).toList();
+      List<_SuggestionItem> groups = result.names
+          .map((s) => _SuggestionItem(type: ScheduleType.group, value: s))
+          .toList();
       List<_SuggestionItem> teachers = result.teacherNames
           .map((s) => _SuggestionItem(type: ScheduleType.teacher, value: s))
           .toList();
-      List<_SuggestionItem> auds =
-      result.auditories.map((s) => _SuggestionItem(type: ScheduleType.auditory, value: s)).toList();
+      List<_SuggestionItem> auds = result.auditories
+          .map((s) => _SuggestionItem(type: ScheduleType.auditory, value: s))
+          .toList();
 
-      // чистка: trim + remove empty + remove duplicates (внутри каждой секции)
       groups = _cleanSection(groups);
       teachers = _cleanSection(teachers);
       auds = _cleanSection(auds);

@@ -1,23 +1,22 @@
 import 'dart:convert';
 
-import 'package:flutter/cupertino.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:schedule_iti_khsu_0_01/models/lesson.dart';
-
-import '../models/favorite_item.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:synchronized/synchronized.dart';
 
+import '../models/favorite_item.dart';
+import '../models/lesson.dart';
 import '../models/note.dart';
 import '../models/upcoming_lesson_reminder.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
-  factory DatabaseHelper() => _instance;
-  DatabaseHelper._internal();
-
   static Database? _database;
-  static final _lock = Lock(); // ← добавь это
+  static final _lock = Lock();
+
+  factory DatabaseHelper() => _instance;
+
+  DatabaseHelper._internal();
 
   Future<Database> get database async {
     final existing = _database;
@@ -31,124 +30,46 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    try {
-      final String path = join(await getDatabasesPath(), 'schedule.db');
-      debugPrint('Путь к БД: $path');
-      final db = await openDatabase(
-        path,
-        version: 4,
-        onCreate: _onCreate,
-        onUpgrade: _onUpgrade,
-      );
-      debugPrint('БД открыта успешно');
-      return db;
-    } catch (e, stack) {
-      debugPrint('Ошибка инициализации БД: $e\n$stack');
-      rethrow;
-    }
+    final path = join(await getDatabasesPath(), 'schedule_v3.db');
+
+    return openDatabase(
+      path,
+      version: 1,
+      onCreate: _onCreate,
+    );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // 1. Временные слоты
     await db.execute('''
       CREATE TABLE time_slot (
         slot_id INTEGER PRIMARY KEY,
-        start_time TEXT NOT NULL,  -- "08:30"
-        end_time TEXT NOT NULL     -- "10:00"
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL
       )
     ''');
 
-    // Предзаполним типичные слоты (можно позже обновлять через API или настройки)
     await _insertDefaultTimeSlots(db);
 
-    // 2. Занятия
     await db.execute('''
       CREATE TABLE lesson (
         lesson_id INTEGER PRIMARY KEY,
-        date TEXT NOT NULL,               -- "2026-02-06"
-        weekday INTEGER NOT NULL,         -- 1=пн, ..., 7=вс
-        slot_id INTEGER NOT NULL,         -- ссылка на time_slot
+        date TEXT NOT NULL,
+        weekday INTEGER NOT NULL,
+        slot_id INTEGER NOT NULL,
         subject TEXT NOT NULL,
         teacher TEXT NOT NULL,
         auditory TEXT NOT NULL,
-        groups_json TEXT,  -- будет хранить '["М-124-1", "С-25"]'
-        lesson_type TEXT NOT NULL,        -- "л.", "пр.", "лаб."
-        target_type TEXT NOT NULL,        -- "group", "teacher", или "auditory"
-        target_value TEXT NOT NULL,       -- например: "М-124-1", "Заливаха А.В.", "2-423"
+        groups_json TEXT,
+        lesson_type TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_value TEXT NOT NULL,
         UNIQUE(date, slot_id, target_type, target_value) ON CONFLICT REPLACE
       )
     ''');
 
+    // Снимок нужен, чтобы отличать «занятий нет» от «день ещё не загружался».
     await db.execute('''
-  CREATE TABLE schedule_snapshot (
-    snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL,
-    target_type TEXT NOT NULL,
-    target_value TEXT NOT NULL,
-    has_data INTEGER NOT NULL,
-    synced_at INTEGER NOT NULL,
-    UNIQUE(date, target_type, target_value) ON CONFLICT REPLACE
-  )
-''');
-
-    // 3. Избранные
-    await db.execute('''
-      CREATE TABLE favorite (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,               -- "М-124-1", "Заливаха А.В.", "2-423"
-        type TEXT NOT NULL                -- "group", "teacher", "auditory"
-      )
-    ''');
-
-    // 4. Заметки
-    await db.execute('''
-    CREATE TABLE note (
-      note_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT,
-      description TEXT,
-      subject TEXT,
-      created_at INTEGER NOT NULL,
-      due_at INTEGER,
-      lesson_id INTEGER,
-    FOREIGN KEY (lesson_id) REFERENCES lesson (lesson_id) ON DELETE CASCADE
-  )
-''');
-  }
-
-  Future<void> _insertDefaultTimeSlots(Database db) async {
-    // Пример для твоего института — адаптируй под реальное расписание
-    final slots = [
-      {'id': 1, 'start': '08:00', 'end': '09:30'},
-      {'id': 2, 'start': '09:50', 'end': '11:20'},
-      {'id': 3, 'start': '11:40', 'end': '13:10'},
-      {'id': 4, 'start': '13:40', 'end': '15:10'},
-      {'id': 5, 'start': '15:20', 'end': '16:50'},
-      {'id': 6, 'start': '17:00', 'end': '18:30'}, // как в твоём JSON
-      {'id': 7, 'start': '18:40', 'end': '20:10'},
-    ];
-
-    for (var slot in slots) {
-      await db.insert('time_slot', {
-        'slot_id': slot['id'],
-        'start_time': slot['start'],
-        'end_time': slot['end'],
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    }
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // старых миграций пока нет
-    }
-
-    if (oldVersion < 3) {
-      await _addColumnIfMissing(db, 'note', 'subject', 'TEXT');
-      await _addColumnIfMissing(db, 'note', 'due_at', 'INTEGER');
-    }
-
-    if (oldVersion < 4) {
-      await db.execute('''
-      CREATE TABLE IF NOT EXISTS schedule_snapshot (
+      CREATE TABLE schedule_snapshot (
         snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT NOT NULL,
         target_type TEXT NOT NULL,
@@ -158,26 +79,26 @@ class DatabaseHelper {
         UNIQUE(date, target_type, target_value) ON CONFLICT REPLACE
       )
     ''');
-    }
+
+    await db.execute('''
+      CREATE TABLE favorite (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE note (
+        note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        description TEXT,
+        subject TEXT,
+        created_at INTEGER NOT NULL,
+        due_at INTEGER
+      )
+    ''');
   }
-
-  Future<void> _addColumnIfMissing(
-      Database db,
-      String tableName,
-      String columnName,
-      String columnType,
-      ) async {
-    final info = await db.rawQuery('PRAGMA table_info($tableName)');
-    final exists = info.any((row) => row['name'] == columnName);
-
-    if (!exists) {
-      await db.execute(
-        'ALTER TABLE $tableName ADD COLUMN $columnName $columnType',
-      );
-    }
-  }
-
-  // В классе DatabaseHelper
 
   Future<void> saveSchedule({
     required String date,
@@ -228,7 +149,7 @@ class DatabaseHelper {
     required String targetValue,
   }) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
+    final maps = await db.query(
       'lesson',
       where: 'date = ? AND target_type = ? AND target_value = ?',
       whereArgs: [date, targetType, targetValue],
@@ -246,53 +167,12 @@ class DatabaseHelper {
     for (final row in maps) {
       final id = row['slot_id'] as int;
       out[id] = (
-      start: row['start_time'] as String,
-      end: row['end_time'] as String,
+        start: row['start_time'] as String,
+        end: row['end_time'] as String,
       );
     }
+
     return out;
-  }
-
-
-  // Получить все избранные
-  Future<List<FavoriteItem>> getFavorites() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'favorite',
-      orderBy: 'id DESC', // последние сверху
-    );
-    return maps.map((e) => FavoriteItem.fromMap(e)).toList();
-  }
-
-// Добавить в избранное
-  Future<void> addFavorite({required String name, required String type}) async {
-    final db = await database;
-    // Проверим дубликат
-    final exists = await db.query(
-      'favorite',
-      where: 'name = ? AND type = ?',
-      whereArgs: [name, type],
-    );
-    if (exists.isEmpty) {
-      await db.insert('favorite', {'name': name, 'type': type});
-    }
-  }
-
-// Удалить из избранного
-  Future<void> removeFavorite(int id) async {
-    final db = await database;
-    await db.delete('favorite', where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<List<String>> getFavoritesByType(String type) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'favorite',
-      where: 'type = ?',
-      whereArgs: [type],
-      orderBy: 'name',
-    );
-    return maps.map((row) => row['name'] as String).toList();
   }
 
   Future<bool> hasScheduleSnapshot({
@@ -313,42 +193,47 @@ class DatabaseHelper {
     return maps.isNotEmpty;
   }
 
-  Future<bool?> getScheduleSnapshotHasData({
-    required String date,
-    required String targetType,
-    required String targetValue,
-  }) async {
+  Future<List<FavoriteItem>> getFavorites() async {
+    final db = await database;
+    final maps = await db.query(
+      'favorite',
+      orderBy: 'id DESC',
+    );
+
+    return maps.map((e) => FavoriteItem.fromMap(e)).toList();
+  }
+
+  Future<void> addFavorite({required String name, required String type}) async {
     final db = await database;
 
-    final maps = await db.query(
-      'schedule_snapshot',
-      columns: ['has_data'],
-      where: 'date = ? AND target_type = ? AND target_value = ?',
-      whereArgs: [date, targetType, targetValue],
+    final exists = await db.query(
+      'favorite',
+      where: 'name = ? AND type = ?',
+      whereArgs: [name, type],
       limit: 1,
     );
 
-    if (maps.isEmpty) return null;
-
-    final raw = maps.first['has_data'] as int? ?? 0;
-    return raw == 1;
+    if (exists.isEmpty) {
+      await db.insert('favorite', {'name': name, 'type': type});
+    }
   }
 
-
-  // ===== NOTES =====
-
+  Future<void> removeFavorite(int id) async {
+    final db = await database;
+    await db.delete('favorite', where: 'id = ?', whereArgs: [id]);
+  }
 
   Future<List<Note>> getNotes() async {
     final db = await database;
 
     final maps = await db.rawQuery('''
-    SELECT *
-    FROM note
-    ORDER BY
-      CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
-      due_at ASC,
-      created_at DESC
-  ''');
+      SELECT *
+      FROM note
+      ORDER BY
+        CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+        due_at ASC,
+        created_at DESC
+    ''');
 
     return maps.map((e) => Note.fromMap(e)).toList();
   }
@@ -358,7 +243,6 @@ class DatabaseHelper {
     String? description,
     String? subject,
     int? dueAt,
-    int? lessonId,
   }) async {
     final db = await database;
 
@@ -370,7 +254,6 @@ class DatabaseHelper {
         'subject': subject,
         'created_at': DateTime.now().millisecondsSinceEpoch,
         'due_at': dueAt,
-        'lesson_id': lessonId,
       },
       conflictAlgorithm: ConflictAlgorithm.abort,
     );
@@ -382,7 +265,6 @@ class DatabaseHelper {
     String? description,
     String? subject,
     int? dueAt,
-    int? lessonId,
   }) async {
     final db = await database;
 
@@ -393,7 +275,6 @@ class DatabaseHelper {
         'description': description,
         'subject': subject,
         'due_at': dueAt,
-        'lesson_id': lessonId,
       },
       where: 'note_id = ?',
       whereArgs: [noteId],
@@ -409,7 +290,6 @@ class DatabaseHelper {
       whereArgs: [noteId],
     );
   }
-
 
   Future<List<Note>> getNotesWithDueAt() async {
     final db = await database;
@@ -433,7 +313,6 @@ class DatabaseHelper {
     final whereBuffer = StringBuffer(
       'l.target_type = ? AND l.target_value = ?',
     );
-
     final args = <Object?>[targetType, targetValue];
 
     if (fromDate != null) {
@@ -442,25 +321,55 @@ class DatabaseHelper {
     }
 
     final maps = await db.rawQuery('''
-    SELECT
-      l.lesson_id,
-      l.subject,
-      l.teacher,
-      l.auditory,
-      l.groups_json,
-      l.date,
-      t.start_time,
-      l.target_type,
-      l.target_value
-    FROM lesson l
-    INNER JOIN time_slot t ON t.slot_id = l.slot_id
-    WHERE ${whereBuffer.toString()}
-    ORDER BY l.date ASC, l.slot_id ASC
-  ''', args);
+      SELECT
+        l.lesson_id,
+        l.subject,
+        l.teacher,
+        l.auditory,
+        l.groups_json,
+        l.date,
+        t.start_time,
+        l.target_type,
+        l.target_value
+      FROM lesson l
+      INNER JOIN time_slot t ON t.slot_id = l.slot_id
+      WHERE ${whereBuffer.toString()}
+      ORDER BY l.date ASC, l.slot_id ASC
+    ''', args);
 
     return maps.map((e) => UpcomingLessonReminder.fromMap(e)).toList();
   }
 
+  Future<void> _insertDefaultTimeSlots(Database db) async {
+    final slots = [
+      {'id': 1, 'start': '08:00', 'end': '09:30'},
+      {'id': 2, 'start': '09:50', 'end': '11:20'},
+      {'id': 3, 'start': '11:40', 'end': '13:10'},
+      {'id': 4, 'start': '13:40', 'end': '15:10'},
+      {'id': 5, 'start': '15:20', 'end': '16:50'},
+      {'id': 6, 'start': '17:00', 'end': '18:30'},
+      {'id': 7, 'start': '18:40', 'end': '20:10'},
+    ];
 
+    for (final slot in slots) {
+      await db.insert(
+        'time_slot',
+        {
+          'slot_id': slot['id'],
+          'start_time': slot['start'],
+          'end_time': slot['end'],
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+  }
 
+  Future<void> clearDownloadedSchedules() async {
+    final db = await database;
+
+    await db.delete('lesson');
+    await db.delete('schedule_snapshot');
+
+    await db.execute('VACUUM');
+  }
 }

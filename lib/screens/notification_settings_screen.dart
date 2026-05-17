@@ -14,8 +14,10 @@ class NotificationSettingsScreen extends StatefulWidget {
 
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
-  static const List<int> _lessonOptions = [5, 10, 15, 20, 30, 45, 60];
-  static const List<int> _noteOptions = [10, 30, 60, 120, 180, 720, 1440];
+  static const List<int> _lessonOptions =
+      NotificationSettingsStorage.lessonReminderOptions;
+  static const List<int> _noteOptions =
+      NotificationSettingsStorage.noteReminderOptions;
 
   bool _isLoading = true;
 
@@ -92,16 +94,30 @@ class _NotificationSettingsScreenState
     });
   }
 
+  String _plural(int value, String one, String few, String many) {
+    final mod10 = value % 10;
+    final mod100 = value % 100;
+
+    if (mod10 == 1 && mod100 != 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+      return few;
+    }
+    return many;
+  }
+
   String _minutesLabel(int minutes) {
     if (minutes < 60) return '$minutes мин';
+
     if (minutes % 1440 == 0) {
       final days = minutes ~/ 1440;
-      return days == 1 ? '1 день' : '$days дн.';
+      return '$days ${_plural(days, 'день', 'дня', 'дней')}';
     }
+
     if (minutes % 60 == 0) {
       final hours = minutes ~/ 60;
-      return hours == 1 ? '1 час' : '$hours ч';
+      return '$hours ${_plural(hours, 'час', 'часа', 'часов')}';
     }
+
     return '$minutes мин';
   }
 

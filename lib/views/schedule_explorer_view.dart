@@ -42,7 +42,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   DateTime _selectedDate = DateTime.now();
 
   Future<_DayData>? _dayFuture;
-  Future<List<FavoriteItem>>? _favoritesFuture;
   Future<Set<String>>? _noteSubjectsFuture;
 
   final List<_ScheduleNavigationEntry> _history = [];
@@ -50,6 +49,9 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
   Brightness? _lastBrightness;
+  double? _horizontalDragStartX;
+
+  static const double _systemGestureFallbackWidth = 32.0;
 
   @override
   void initState() {
@@ -110,7 +112,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   }
 
   void _reloadSideData() {
-    _favoritesFuture = _db.getFavorites();
     _noteSubjectsFuture = _loadNoteSubjects();
   }
 
@@ -183,7 +184,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
 
         return response;
       } catch (_) {
-        // fallback ниже
       }
     }
 
@@ -219,6 +219,23 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _dayFuture = _getDayData(forceRefresh: true);
     });
   }
+  String _scheduleErrorMessage(Object? error) {
+    final raw = error.toString();
+
+    if (raw.contains('Нет подключения к интернету') ||
+        raw.contains('нет сохранённых данных')) {
+      return 'Расписание на выбранную дату ещё не загружено. '
+          'Подключитесь к интернету и повторите попытку.';
+    }
+
+    if (raw.contains('Не удалось обновить расписание')) {
+      return 'Не удалось загрузить расписание. '
+          'Проверьте подключение к интернету и повторите попытку.';
+    }
+
+    return 'Не удалось получить данные расписания. '
+        'Попробуйте обновить страницу.';
+  }
 
   void _changeDate(int deltaDays) {
     setState(() {
@@ -232,7 +249,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       context,
       MaterialPageRoute(
         builder: (_) => NoteEditScreen(
-          lessonId: lesson.id == 0 ? null : lesson.id,
           initialSubject: lesson.subject,
         ),
       ),
@@ -251,16 +267,48 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     }
   }
 
+  void _handleHorizontalDragStart(DragStartDetails details) {
+    _horizontalDragStartX = details.globalPosition.dx;
+  }
+
+  bool _startedFromSystemGestureEdge(double velocity) {
+    final startX = _horizontalDragStartX;
+    if (startX == null) return false;
+
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final gestureInsets = mediaQuery.systemGestureInsets;
+
+    final leftEdgeWidth = math.max(
+      gestureInsets.left,
+      _systemGestureFallbackWidth,
+    );
+    final rightEdgeWidth = math.max(
+      gestureInsets.right,
+      _systemGestureFallbackWidth,
+    );
+
+    if (velocity > 0 && startX <= leftEdgeWidth) return true;
+    if (velocity < 0 && startX >= screenWidth - rightEdgeWidth) return true;
+
+    return false;
+  }
+
   void _handleHorizontalDragEnd(DragEndDetails details) {
     final velocity = details.primaryVelocity ?? 0;
 
-    if (velocity.abs() < 250) return;
+    if (velocity.abs() < 250 || _startedFromSystemGestureEdge(velocity)) {
+      _horizontalDragStartX = null;
+      return;
+    }
 
     if (velocity < 0) {
       _changeDate(1);
     } else {
       _changeDate(-1);
     }
+
+    _horizontalDragStartX = null;
   }
 
   Future<void> _openScheduleTarget({
@@ -286,16 +334,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       );
     }
 
-    await CurrentScheduleStorage.save(
-      ScheduleTarget(
-        type: type,
-        value: trimmed,
-      ),
-    );
-
-    await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
-    await LocalNotificationService.instance.rescheduleAll();
-
     if (!mounted) return;
 
     setState(() {
@@ -303,6 +341,15 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _selectedItem = trimmed;
       _dayFuture = null;
     });
+
+    await CurrentScheduleStorage.save(
+      ScheduleTarget(
+        type: type,
+        value: trimmed,
+      ),
+    );
+
+    _runScheduleSideEffects();
   }
 
   Future<void> _openTeacherSchedule(String teacher) async {
@@ -331,16 +378,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
 
     final previous = _history.removeLast();
 
-    await CurrentScheduleStorage.save(
-      ScheduleTarget(
-        type: previous.type,
-        value: previous.value,
-      ),
-    );
-
-    await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
-    await LocalNotificationService.instance.rescheduleAll();
-
     if (!mounted) return;
 
     setState(() {
@@ -349,6 +386,26 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _selectedDate = previous.date;
       _dayFuture = null;
     });
+
+    await CurrentScheduleStorage.save(
+      ScheduleTarget(
+        type: previous.type,
+        value: previous.value,
+      ),
+    );
+
+    _runScheduleSideEffects();
+  }
+
+  void _runScheduleSideEffects() {
+    unawaited(() async {
+      try {
+        await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
+        await LocalNotificationService.instance.rescheduleAll();
+      } catch (_) {
+        // Не блокируем переход по ссылке из-за синхронизации и уведомлений.
+      }
+    }());
   }
 
   Future<void> _openFavoritesSheet() async {
@@ -383,12 +440,6 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
         );
       },
     );
-
-    if (!mounted) return;
-
-    setState(() {
-      _favoritesFuture = _db.getFavorites();
-    });
   }
 
   IconData _typeIcon(ScheduleType type) {
@@ -593,6 +644,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
           Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: _handleHorizontalDragStart,
               onHorizontalDragEnd: _handleHorizontalDragEnd,
               child: FutureBuilder<_DayData>(
                 future: _getDayFuture(),
@@ -602,8 +654,9 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
                   }
 
                   if (daySnapshot.hasError) {
-                    return Center(
-                      child: Text('Ошибка: ${daySnapshot.error}'),
+                    return _ScheduleLoadError(
+                      message: _scheduleErrorMessage(daySnapshot.error),
+                      onRetry: _refreshSchedule,
                     );
                   }
 
@@ -643,7 +696,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
                             _normalizeSubject(lesson.subject),
                           );
 
-                          return LessonCard(
+                          return _LessonCard(
                             lesson: lesson,
                             style: style,
                             scheduleType: _scheduleType,
@@ -893,7 +946,74 @@ class _DatePagerButton extends StatelessWidget {
   }
 }
 
-class LessonCard extends StatelessWidget {
+class _ScheduleLoadError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ScheduleLoadError({
+    required this.message,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            elevation: 0,
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.65),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.cloud_off_rounded,
+                    size: 52,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Расписание не загружено',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Повторить'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LessonCard extends StatelessWidget {
   final Lesson lesson;
   final _LessonBlockStyle style;
   final ScheduleType scheduleType;
@@ -904,8 +1024,7 @@ class LessonCard extends StatelessWidget {
   final ValueChanged<String>? onAuditoryTap;
   final ValueChanged<String>? onGroupTap;
 
-  const LessonCard({
-    super.key,
+  const _LessonCard({
     required this.lesson,
     required this.style,
     required this.scheduleType,

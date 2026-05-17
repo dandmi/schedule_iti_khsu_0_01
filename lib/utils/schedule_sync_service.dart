@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 import '../api/api_client.dart';
 import '../database/database_helper.dart';
 import '../utils/current_schedule_storage.dart';
@@ -10,54 +8,20 @@ class ScheduleSyncService {
 
   static final ScheduleSyncService instance = ScheduleSyncService._internal();
 
+  static const int preloadDays = 7;
+
   final ApiClient _api = ApiClient();
   final DatabaseHelper _db = DatabaseHelper();
 
-  Future<bool> syncOnAppStart() async {
-    final hasInternet = await _api.hasInternetConnection();
-    if (!hasInternet) {
-      debugPrint('🌐 Нет интернета: пропускаем стартовую синхронизацию');
-      return false;
-    }
-
-    final current = await CurrentScheduleStorage.load();
-    final favorites = await _db.getFavorites();
-
-    final tasks = <String, ({ScheduleType type, String value, DateTime date})>{};
-
-    void addTask(ScheduleType type, String value, DateTime date) {
-      final key =
-          '${type.name}|${value.trim()}|${date.year}-${date.month}-${date.day}';
-      tasks[key] = (type: type, value: value.trim(), date: date);
-    }
-
-    final now = DateTime.now();
-    final tomorrow = now.add(const Duration(days: 1));
-    final dayAfterTomorrow = now.add(const Duration(days: 2));
-
-    if (current != null) {
-      addTask(current.type, current.value, now);
-      addTask(current.type, current.value, tomorrow);
-      addTask(current.type, current.value, dayAfterTomorrow);
-    }
-
-    for (final item in favorites) {
-      addTask(item.scheduleType, item.name, tomorrow);
-      addTask(item.scheduleType, item.name, dayAfterTomorrow);
-    }
-
-    for (final task in tasks.values) {
-      await _syncOne(
-        type: task.type,
-        value: task.value,
-        date: task.date,
-      );
-    }
-
-    return true;
+  Future<bool> syncOnAppStart() {
+    return _syncDates(includeCurrentDay: true);
   }
 
-  Future<bool> syncCurrentAndFavoritesFutureDates() async {
+  Future<bool> syncCurrentAndFavoritesFutureDates() {
+    return _syncDates(includeCurrentDay: false);
+  }
+
+  Future<bool> _syncDates({required bool includeCurrentDay}) async {
     final hasInternet = await _api.hasInternetConnection();
     if (!hasInternet) return false;
 
@@ -65,24 +29,40 @@ class ScheduleSyncService {
     final favorites = await _db.getFavorites();
 
     final tasks = <String, ({ScheduleType type, String value, DateTime date})>{};
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final startOffset = includeCurrentDay ? 0 : 1;
+    final endOffset = includeCurrentDay ? preloadDays - 1 : preloadDays;
 
     void addTask(ScheduleType type, String value, DateTime date) {
-      final key =
-          '${type.name}|${value.trim()}|${date.year}-${date.month}-${date.day}';
-      tasks[key] = (type: type, value: value.trim(), date: date);
+      final trimmedValue = value.trim();
+      final key = '${type.name}|$trimmedValue|${_dateStr(date)}';
+
+      tasks[key] = (
+        type: type,
+        value: trimmedValue,
+        date: date,
+      );
     }
 
-    final tomorrow = DateTime.now().add(const Duration(days: 1));
-    final dayAfterTomorrow = DateTime.now().add(const Duration(days: 2));
-
     if (current != null) {
-      addTask(current.type, current.value, tomorrow);
-      addTask(current.type, current.value, dayAfterTomorrow);
+      for (var offset = startOffset; offset <= endOffset; offset++) {
+        addTask(
+          current.type,
+          current.value,
+          today.add(Duration(days: offset)),
+        );
+      }
     }
 
     for (final item in favorites) {
-      addTask(item.scheduleType, item.name, tomorrow);
-      addTask(item.scheduleType, item.name, dayAfterTomorrow);
+      for (var offset = 1; offset <= preloadDays; offset++) {
+        addTask(
+          item.scheduleType,
+          item.name,
+          today.add(Duration(days: offset)),
+        );
+      }
     }
 
     for (final task in tasks.values) {
@@ -108,18 +88,21 @@ class ScheduleSyncService {
         date: date,
       );
 
-      final dateStr =
-          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-
       await _db.saveSchedule(
-        date: dateStr,
+        date: _dateStr(date),
         weekday: response.weekday,
         lessons: response.lessons,
         targetType: type.name,
         targetValue: value,
       );
-    } catch (e, stack) {
-      debugPrint('🌐 Ошибка синхронизации $value: $e\n$stack');
-    }
+    } catch (_) {}
+  }
+
+  String _dateStr(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
   }
 }

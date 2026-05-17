@@ -7,6 +7,7 @@ import '../widgets/main_layout.dart';
 import 'notes_screen.dart';
 import 'schedule_screen.dart';
 import 'settings_screen.dart';
+import '../utils/schedule_widget_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final ThemeMode themeMode;
@@ -22,7 +23,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _index = 0;
 
   final _notesKey = GlobalKey<NotesScreenState>();
@@ -35,6 +36,40 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _buildPages();
     _bootstrapData();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+
+    _refreshBackgroundData(markScheduleChanged: true);
+  }
+
+  Future<bool> _refreshBackgroundData({
+    required bool markScheduleChanged,
+  }) async {
+    final online = await ScheduleSyncService.instance.syncOnAppStart();
+
+    try {
+      await ScheduleWidgetService.instance.refreshInstalledWidget();
+    } catch (_) {}
+
+    try {
+      await LocalNotificationService.instance.rescheduleAll();
+    } catch (_) {}
+
+    if (mounted && markScheduleChanged && online) {
+      AppRefreshBus.markScheduleChanged();
+    }
+
+    return online;
   }
 
   @override
@@ -50,19 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _bootstrapData() async {
-    final online = await ScheduleSyncService.instance.syncOnAppStart();
-
-    try {
-      await LocalNotificationService.instance.rescheduleAll();
-    } catch (e, stack) {
-      debugPrint('❌ Failed to reschedule after bootstrap: $e\n$stack');
-    }
-
-    if (!mounted) return;
-
-    if (online) {
-      AppRefreshBus.markScheduleChanged();
-    }
+    await _refreshBackgroundData(markScheduleChanged: true);
   }
 
   void _buildPages() {

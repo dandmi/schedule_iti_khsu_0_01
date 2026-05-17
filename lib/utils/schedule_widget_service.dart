@@ -6,6 +6,7 @@ import 'package:home_widget/home_widget.dart';
 import '../api/api_client.dart';
 import '../database/database_helper.dart';
 import '../models/schedule_response.dart';
+import '../models/schedule_target.dart';
 import '../utils/current_schedule_storage.dart';
 import '../utils/schedule_type.dart';
 
@@ -21,6 +22,16 @@ class ScheduleWidgetService {
   final ApiClient _apiClient = ApiClient();
   final DatabaseHelper _db = DatabaseHelper();
 
+  static const Map<int, ({String start, String end})> _pairSlots = {
+    1: (start: '08:00', end: '09:30'),
+    2: (start: '09:40', end: '11:10'),
+    3: (start: '11:20', end: '12:50'),
+    4: (start: '13:30', end: '15:00'),
+    5: (start: '15:10', end: '16:40'),
+    6: (start: '16:50', end: '18:20'),
+    7: (start: '18:30', end: '20:00'),
+  };
+
   Future<String> createOrUpdateTodayWidget() async {
     if (!Platform.isAndroid) {
       return 'Виджет пока реализован только для Android';
@@ -31,51 +42,7 @@ class ScheduleWidgetService {
       return 'Сначала выберите текущее расписание';
     }
 
-    final now = DateTime.now();
-    final slots = await _db.getTimeSlots();
-
-    final payload = <String, dynamic>{};
-
-    for (int i = 0; i < preloadDays; i++) {
-      final date = DateTime(now.year, now.month, now.day + i);
-
-      final schedule = await _loadScheduleForDay(
-        targetType: target.type,
-        targetValue: target.value,
-        date: date,
-      );
-
-      payload[_dateStr(date)] = {
-        'dateLabel': _formatDate(date),
-        'items': _buildWidgetItems(
-          schedule: schedule,
-          slots: slots,
-          scheduleType: target.type,
-        ),
-      };
-    }
-
-    await HomeWidget.saveWidgetData<String>(
-      'schedule_widget_target_name',
-      target.value,
-    );
-    await HomeWidget.saveWidgetData<String>(
-      'schedule_widget_target_type',
-      target.type.name,
-    );
-    await HomeWidget.saveWidgetData<String>(
-      'schedule_widget_payload_json',
-      jsonEncode(payload),
-    );
-    await HomeWidget.saveWidgetData<int>(
-      'schedule_widget_generated_at',
-      DateTime.now().millisecondsSinceEpoch,
-    );
-
-    await HomeWidget.updateWidget(
-      name: providerName,
-      androidName: providerName,
-    );
+    await _saveWidgetDataForTarget(target);
 
     final installedWidgets = await HomeWidget.getInstalledWidgets();
     final hasInstalledWidget = installedWidgets.isNotEmpty;
@@ -87,14 +54,77 @@ class ScheduleWidgetService {
         name: providerName,
         androidName: providerName,
       );
-      return 'Виджет подготовлен. Подтвердите добавление на главный экран';
     }
 
-    if (!hasInstalledWidget && !pinSupported) {
-      return 'Данные для виджета подготовлены. Добавьте виджет через список виджетов Android';
+    await HomeWidget.updateWidget(
+      name: providerName,
+      androidName: providerName,
+    );
+
+    return 'Виджет подготовлен';
+  }
+
+  Future<void> refreshInstalledWidget() async {
+    if (!Platform.isAndroid) return;
+
+    final installedWidgets = await HomeWidget.getInstalledWidgets();
+    if (installedWidgets.isEmpty) return;
+
+    final target = await CurrentScheduleStorage.load();
+    if (target == null) return;
+
+    await _saveWidgetDataForTarget(target);
+
+    await HomeWidget.updateWidget(
+      name: providerName,
+      androidName: providerName,
+    );
+  }
+
+  Future<void> _saveWidgetDataForTarget(ScheduleTarget target) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final payload = <String, dynamic>{};
+
+    for (var i = 0; i < preloadDays; i++) {
+      final date = today.add(Duration(days: i));
+
+      final schedule = await _loadScheduleForDay(
+        targetType: target.type,
+        targetValue: target.value,
+        date: date,
+      );
+
+      final dateKey = _dateStr(date);
+
+      payload[dateKey] = {
+        'dateLabel': _dateLabel(date),
+        'items': _buildWidgetItems(
+          schedule: schedule,
+          scheduleType: target.type,
+        ),
+      };
     }
 
-    return 'Виджет обновлён';
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_name',
+      target.value,
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_type',
+      target.type.name,
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_payload_json',
+      jsonEncode(payload),
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_generated_at',
+      DateTime.now().toIso8601String(),
+    );
   }
 
   Future<ScheduleResponse> _loadScheduleForDay({
@@ -103,7 +133,6 @@ class ScheduleWidgetService {
     required DateTime date,
   }) async {
     final dateStr = _dateStr(date);
-
     final hasInternet = await _apiClient.hasInternetConnection();
 
     if (hasInternet) {
@@ -124,11 +153,12 @@ class ScheduleWidgetService {
 
         return response;
       } catch (_) {
-        // fallback to cache
+        // Если загрузить расписание из сети не удалось,
+        // ниже будет использована локальная копия из БД.
       }
     }
 
-    final cached = await _db.getSchedule(
+    final cachedLessons = await _db.getSchedule(
       date: dateStr,
       targetType: targetType.name,
       targetValue: targetValue,
@@ -137,13 +167,12 @@ class ScheduleWidgetService {
     return ScheduleResponse(
       weekday: date.weekday,
       weekNumber: 0,
-      lessons: cached,
+      lessons: cachedLessons,
     );
   }
 
   List<Map<String, String>> _buildWidgetItems({
     required ScheduleResponse schedule,
-    required Map<int, ({String start, String end})> slots,
     required ScheduleType scheduleType,
   }) {
     if (schedule.lessons.isEmpty) {
@@ -151,33 +180,41 @@ class ScheduleWidgetService {
         {
           'title': 'Нет занятий',
           'subtitle': '',
-        }
+        },
       ];
     }
 
     final items = <Map<String, String>>[];
 
     for (final lesson in schedule.lessons) {
-      final slot = slots[lesson.time];
+      final slot = _pairSlots[lesson.time];
       final start = slot?.start ?? '--:--';
       final end = slot?.end ?? '--:--';
 
-      final subtitleParts = <String>[
-        lesson.typeLesson,
-      ];
+      final subtitleParts = <String>[];
 
-      if (scheduleType != ScheduleType.teacher &&
-          lesson.teacher.trim().isNotEmpty) {
-        subtitleParts.add(lesson.teacher.trim());
+      final typeLesson = lesson.typeLesson.trim();
+      if (typeLesson.isNotEmpty) {
+        subtitleParts.add(typeLesson);
       }
 
-      if (scheduleType != ScheduleType.auditory &&
-          lesson.auditory.trim().isNotEmpty) {
-        subtitleParts.add('Ауд. ${lesson.auditory.trim()}');
+      final teacher = lesson.teacher.trim();
+      if (scheduleType != ScheduleType.teacher && teacher.isNotEmpty) {
+        subtitleParts.add(teacher);
       }
 
-      if (scheduleType != ScheduleType.group && lesson.group.isNotEmpty) {
-        subtitleParts.add(lesson.group.join(', '));
+      final auditory = lesson.auditory.trim();
+      if (scheduleType != ScheduleType.auditory && auditory.isNotEmpty) {
+        subtitleParts.add('Ауд. $auditory');
+      }
+
+      final groups = lesson.group
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
+
+      if (scheduleType != ScheduleType.group && groups.isNotEmpty) {
+        subtitleParts.add(groups.join(', '));
       }
 
       items.add({
@@ -194,6 +231,21 @@ class ScheduleWidgetService {
     final m = d.month.toString().padLeft(2, '0');
     final day = d.day.toString().padLeft(2, '0');
     return '$y-$m-$day';
+  }
+
+  String _dateLabel(DateTime d) {
+    const weekdays = [
+      'Понедельник',
+      'Вторник',
+      'Среда',
+      'Четверг',
+      'Пятница',
+      'Суббота',
+      'Воскресенье',
+    ];
+
+    final weekday = weekdays[d.weekday - 1];
+    return '$weekday, ${_formatDate(d)}';
   }
 
   String _two(int value) => value.toString().padLeft(2, '0');

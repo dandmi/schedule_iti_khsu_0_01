@@ -19,7 +19,6 @@ class Lesson {
     required this.group,
   });
 
-// Из JSON (API)
   factory Lesson.fromJson(Map<String, dynamic> json) {
     return Lesson(
       id: json['id'] as int? ?? 0,
@@ -32,16 +31,13 @@ class Lesson {
     );
   }
 
-  // Из БД (Map<String, dynamic>)
   factory Lesson.fromMap(Map<String, dynamic> map) {
-    // Безопасное извлечение JSON-строки
     final groupsJson = map['groups_json'] as String?;
 
     List<String> groups = [];
     if (groupsJson != null) {
       final decoded = jsonDecode(groupsJson);
       if (decoded is List) {
-        // Преобразуем каждый элемент в String
         groups = decoded.map((e) => e.toString()).toList();
       }
     }
@@ -53,7 +49,7 @@ class Lesson {
       auditory: map['auditory'] as String? ?? '',
       typeLesson: map['lesson_type'] as String? ?? '',
       time: map['slot_id'] as int? ?? 0,
-      group: groups, // теперь точно List<String>
+      group: groups,
     );
   }
 }

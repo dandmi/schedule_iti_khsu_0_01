@@ -6,13 +6,11 @@ import '../utils/app_refresh_bus.dart';
 
 class NoteEditScreen extends StatefulWidget {
   final Note? note;
-  final int? lessonId;
   final String? initialSubject;
 
   const NoteEditScreen({
     super.key,
     this.note,
-    this.lessonId,
     this.initialSubject,
   });
 
@@ -108,7 +106,6 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         description: desc,
         subject: subject,
         dueAt: dueAtMillis,
-        lessonId: widget.note!.lessonId ?? widget.lessonId,
       );
     } else {
       await _db.addNote(
@@ -116,7 +113,6 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         description: desc,
         subject: subject,
         dueAt: dueAtMillis,
-        lessonId: widget.lessonId,
       );
     }
 
@@ -125,9 +121,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
 
     try {
       await LocalNotificationService.instance.rescheduleAll();
-    } catch (e, stack) {
-      debugPrint('❌ Failed to reschedule after save: $e\n$stack');
-    }
+    } catch (_) {}
 
     if (!mounted) return;
     Navigator.pop(context, true);

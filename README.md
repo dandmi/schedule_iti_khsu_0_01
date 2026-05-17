@@ -1,16 +1,14 @@
 # schedule_iti_khsu_0_01
 
-A new Flutter project.
+Официальное мобильное приложение расписания для ИТИ ХГУ.
 
-## Getting Started
+## Авторство
+* **Оригинальный разработчик:** Ольховский Данил Дмитриевич (2026 г.)
+* **Владелец проекта:** ФГБОУ ВО «ХГУ им. Н.Ф. Катанова» ИТИ
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Подпись релизной сборки
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Приложение настроено для сборки подписи через файл `android/key.properties`

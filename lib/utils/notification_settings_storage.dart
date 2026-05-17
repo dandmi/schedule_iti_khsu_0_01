@@ -32,22 +32,32 @@ class NotificationSettingsData {
   }) {
     return NotificationSettingsData(
       lessonReminderEnabled:
-      lessonReminderEnabled ?? this.lessonReminderEnabled,
+          lessonReminderEnabled ?? this.lessonReminderEnabled,
       lessonReminderMinutesBefore:
-      lessonReminderMinutesBefore ?? this.lessonReminderMinutesBefore,
+          lessonReminderMinutesBefore ?? this.lessonReminderMinutesBefore,
       noteReminderEnabled: noteReminderEnabled ?? this.noteReminderEnabled,
       noteReminderMinutesBefore:
-      noteReminderMinutesBefore ?? this.noteReminderMinutesBefore,
+          noteReminderMinutesBefore ?? this.noteReminderMinutesBefore,
       tomorrowSummaryEnabled:
-      tomorrowSummaryEnabled ?? this.tomorrowSummaryEnabled,
+          tomorrowSummaryEnabled ?? this.tomorrowSummaryEnabled,
       tomorrowSummaryHour: tomorrowSummaryHour ?? this.tomorrowSummaryHour,
       tomorrowSummaryMinute:
-      tomorrowSummaryMinute ?? this.tomorrowSummaryMinute,
+          tomorrowSummaryMinute ?? this.tomorrowSummaryMinute,
     );
   }
 }
 
 class NotificationSettingsStorage {
+  static const lessonReminderOptions = <int>[5, 10, 15, 20, 30, 45, 60];
+  static const noteReminderOptions = <int>[
+    60,
+    720,
+    1440,
+    2880,
+    4320,
+    10080,
+  ];
+
   static const _lessonEnabledKey = 'lesson_reminder_enabled';
   static const _lessonMinutesKey = 'lesson_reminder_minutes_before';
 
@@ -68,41 +78,66 @@ class NotificationSettingsStorage {
     tomorrowSummaryMinute: 0,
   );
 
+  static int _normalizeMinutes({
+    required int value,
+    required List<int> allowedValues,
+    required int fallback,
+  }) {
+    return allowedValues.contains(value) ? value : fallback;
+  }
+
   static Future<NotificationSettingsData> load() async {
     final prefs = await SharedPreferences.getInstance();
 
+    final lessonMinutes = _normalizeMinutes(
+      value: prefs.getInt(_lessonMinutesKey) ??
+          defaults.lessonReminderMinutesBefore,
+      allowedValues: lessonReminderOptions,
+      fallback: defaults.lessonReminderMinutesBefore,
+    );
+
+    final noteMinutes = _normalizeMinutes(
+      value: prefs.getInt(_noteMinutesKey) ?? defaults.noteReminderMinutesBefore,
+      allowedValues: noteReminderOptions,
+      fallback: defaults.noteReminderMinutesBefore,
+    );
+
     return NotificationSettingsData(
       lessonReminderEnabled:
-      prefs.getBool(_lessonEnabledKey) ?? defaults.lessonReminderEnabled,
-      lessonReminderMinutesBefore:
-      prefs.getInt(_lessonMinutesKey) ?? defaults.lessonReminderMinutesBefore,
+          prefs.getBool(_lessonEnabledKey) ?? defaults.lessonReminderEnabled,
+      lessonReminderMinutesBefore: lessonMinutes,
       noteReminderEnabled:
-      prefs.getBool(_noteEnabledKey) ?? defaults.noteReminderEnabled,
-      noteReminderMinutesBefore:
-      prefs.getInt(_noteMinutesKey) ?? defaults.noteReminderMinutesBefore,
+          prefs.getBool(_noteEnabledKey) ?? defaults.noteReminderEnabled,
+      noteReminderMinutesBefore: noteMinutes,
       tomorrowSummaryEnabled:
-      prefs.getBool(_tomorrowEnabledKey) ?? defaults.tomorrowSummaryEnabled,
+          prefs.getBool(_tomorrowEnabledKey) ?? defaults.tomorrowSummaryEnabled,
       tomorrowSummaryHour:
-      prefs.getInt(_tomorrowHourKey) ?? defaults.tomorrowSummaryHour,
+          prefs.getInt(_tomorrowHourKey) ?? defaults.tomorrowSummaryHour,
       tomorrowSummaryMinute:
-      prefs.getInt(_tomorrowMinuteKey) ?? defaults.tomorrowSummaryMinute,
+          prefs.getInt(_tomorrowMinuteKey) ?? defaults.tomorrowSummaryMinute,
     );
   }
 
   static Future<void> save(NotificationSettingsData settings) async {
     final prefs = await SharedPreferences.getInstance();
 
-    await prefs.setBool(_lessonEnabledKey, settings.lessonReminderEnabled);
-    await prefs.setInt(
-      _lessonMinutesKey,
-      settings.lessonReminderMinutesBefore,
+    final lessonMinutes = _normalizeMinutes(
+      value: settings.lessonReminderMinutesBefore,
+      allowedValues: lessonReminderOptions,
+      fallback: defaults.lessonReminderMinutesBefore,
     );
 
-    await prefs.setBool(_noteEnabledKey, settings.noteReminderEnabled);
-    await prefs.setInt(
-      _noteMinutesKey,
-      settings.noteReminderMinutesBefore,
+    final noteMinutes = _normalizeMinutes(
+      value: settings.noteReminderMinutesBefore,
+      allowedValues: noteReminderOptions,
+      fallback: defaults.noteReminderMinutesBefore,
     );
+
+    await prefs.setBool(_lessonEnabledKey, settings.lessonReminderEnabled);
+    await prefs.setInt(_lessonMinutesKey, lessonMinutes);
+
+    await prefs.setBool(_noteEnabledKey, settings.noteReminderEnabled);
+    await prefs.setInt(_noteMinutesKey, noteMinutes);
 
     await prefs.setBool(_tomorrowEnabledKey, settings.tomorrowSummaryEnabled);
     await prefs.setInt(_tomorrowHourKey, settings.tomorrowSummaryHour);
