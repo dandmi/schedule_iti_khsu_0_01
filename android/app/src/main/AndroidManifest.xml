@@ -33,8 +33,7 @@
 
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection"/>
+            android:exported="false"/>
 
         <receiver
             android:exported="false"

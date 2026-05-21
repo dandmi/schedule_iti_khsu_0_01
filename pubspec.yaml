@@ -1,7 +1,7 @@
 name: scheduleitikhsu
-description: "A new Flutter project."
+description: "Приложение для просмотра расписания занятий в ИТИ ХГУ им. Н.Ф. Катанова"
 publish_to: 'none'
-version: 0.8.0+8
+version: 1.0.0+1
 
 environment:
   sdk: ^3.8.1
@@ -18,7 +18,8 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   timezone: ^0.11.0
   flutter_timezone: ^4.1.1
-  home_widget: ^0.9.1
+
+  home_widget: 0.8.1
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

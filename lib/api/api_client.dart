@@ -75,14 +75,19 @@ class ApiClient {
   }
 
   Future<ScheduleResponse> getGroupSchedule(String group, DateTime date) async {
-    final uri = Uri.parse('$baseUrl/getpairs/date:$group:${_formatDate(date)}');
+    final encodedGroup = Uri.encodeComponent(group);
+    final uri = Uri.parse(
+      '$baseUrl/getpairs/date:$encodedGroup:${_formatDate(date)}',
+    );
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }
 
   Future<ScheduleResponse> getTeacherSchedule(String name, DateTime date) async {
-    final uri =
-    Uri.parse('$baseUrl/getpairs/teacher:$name:${_formatDate(date)}');
+    final encodedName = Uri.encodeComponent(name);
+    final uri = Uri.parse(
+      '$baseUrl/getpairs/teacher:$encodedName:${_formatDate(date)}',
+    );
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }
@@ -91,8 +96,10 @@ class ApiClient {
       String auditory,
       DateTime date,
       ) async {
-    final uri =
-    Uri.parse('$baseUrl/getpairs/auditory:$auditory:${_formatDate(date)}');
+    final encodedAuditory = Uri.encodeComponent(auditory);
+    final uri = Uri.parse(
+      '$baseUrl/getpairs/auditory:$encodedAuditory:${_formatDate(date)}',
+    );
     final json = await _getJson(uri);
     return ScheduleResponse.fromJson(json);
   }

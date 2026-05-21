@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../database/database_helper.dart';
 import '../models/note.dart';
@@ -27,6 +29,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
 
   bool _hasDueDate = false;
   DateTime? _dueAt;
+  bool _isSaving = false;
 
   bool get _isEdit => widget.note?.id != null;
 
@@ -94,37 +97,62 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   }
 
   Future<void> _save() async {
-    final title = _titleCtrl.text.trim();
-    final desc = _descCtrl.text.trim();
-    final subject = _subjectCtrl.text.trim();
-    final dueAtMillis = _hasDueDate ? _dueAt?.millisecondsSinceEpoch : null;
+    if (_isSaving) return;
 
-    if (_isEdit) {
-      await _db.updateNote(
-        noteId: widget.note!.id!,
-        title: title,
-        description: desc,
-        subject: subject,
-        dueAt: dueAtMillis,
-      );
-    } else {
-      await _db.addNote(
-        title: title,
-        description: desc,
-        subject: subject,
-        dueAt: dueAtMillis,
-      );
-    }
+    setState(() {
+      _isSaving = true;
+    });
 
-    AppRefreshBus.markNotesChanged();
-    AppRefreshBus.markScheduleChanged();
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
 
     try {
-      await LocalNotificationService.instance.rescheduleAll();
-    } catch (_) {}
+      final title = _titleCtrl.text.trim();
+      final desc = _descCtrl.text.trim();
+      final subject = _subjectCtrl.text.trim();
+      final dueAtMillis = _hasDueDate ? _dueAt?.millisecondsSinceEpoch : null;
 
-    if (!mounted) return;
-    Navigator.pop(context, true);
+      if (_isEdit) {
+        await _db.updateNote(
+          noteId: widget.note!.id!,
+          title: title,
+          description: desc,
+          subject: subject,
+          dueAt: dueAtMillis,
+        );
+      } else {
+        await _db.addNote(
+          title: title,
+          description: desc,
+          subject: subject,
+          dueAt: dueAtMillis,
+        );
+      }
+
+      AppRefreshBus.markNotesChanged();
+      AppRefreshBus.markScheduleChanged();
+
+      // Пересоздание уведомлений может занимать заметное время.
+      // Не держим пользователя на экране сохранения и не даём нажать кнопку повторно.
+      unawaited(() async {
+        try {
+          await LocalNotificationService.instance.rescheduleAll();
+        } catch (_) {}
+      }());
+
+      if (!mounted) return;
+      navigator.pop(true);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+      });
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить заметку: $e')),
+      );
+    }
   }
 
   @override
@@ -138,8 +166,14 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         title: Text(_isEdit ? 'Редактирование заметки' : 'Новая заметка'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _save,
+            icon: _isSaving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
+            onPressed: _isSaving ? null : _save,
           ),
         ],
       ),
@@ -148,6 +182,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         children: [
           TextField(
             controller: _titleCtrl,
+            enabled: !_isSaving,
             decoration: const InputDecoration(
               labelText: 'Заголовок',
               border: OutlineInputBorder(),
@@ -156,6 +191,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _subjectCtrl,
+            enabled: !_isSaving,
             decoration: const InputDecoration(
               labelText: 'Предмет',
               border: OutlineInputBorder(),
@@ -164,6 +200,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _descCtrl,
+            enabled: !_isSaving,
             minLines: 6,
             maxLines: 12,
             decoration: const InputDecoration(
@@ -178,16 +215,18 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
             value: _hasDueDate,
             title: const Text('Указать срок сдачи'),
             subtitle: Text(dueText),
-            onChanged: (value) {
-              setState(() {
-                _hasDueDate = value;
-                if (!value) {
-                  _dueAt = null;
-                } else {
-                  _dueAt ??= DateTime.now().add(const Duration(days: 1));
-                }
-              });
-            },
+            onChanged: _isSaving
+                ? null
+                : (value) {
+                    setState(() {
+                      _hasDueDate = value;
+                      if (!value) {
+                        _dueAt = null;
+                      } else {
+                        _dueAt ??= DateTime.now().add(const Duration(days: 1));
+                      }
+                    });
+                  },
           ),
           if (_hasDueDate) ...[
             const SizedBox(height: 8),
@@ -195,7 +234,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _pickDueDateTime,
+                    onPressed: _isSaving ? null : _pickDueDateTime,
                     icon: const Icon(Icons.calendar_today),
                     label: const Text('Выбрать дату и время'),
                   ),
@@ -213,12 +252,14 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
                   ),
                   IconButton(
                     tooltip: 'Очистить срок',
-                    onPressed: () {
-                      setState(() {
-                        _hasDueDate = false;
-                        _dueAt = null;
-                      });
-                    },
+                    onPressed: _isSaving
+                        ? null
+                        : () {
+                            setState(() {
+                              _hasDueDate = false;
+                              _dueAt = null;
+                            });
+                          },
                     icon: const Icon(Icons.clear),
                   ),
                 ],
@@ -229,9 +270,15 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.check),
-              label: const Text('Сохранить'),
+              onPressed: _isSaving ? null : _save,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.check),
+              label: Text(_isSaving ? 'Сохранение...' : 'Сохранить'),
             ),
           ),
         ],

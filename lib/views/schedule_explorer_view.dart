@@ -15,6 +15,7 @@ import '../utils/local_notification_service.dart';
 import '../utils/schedule_type.dart';
 import '../utils/app_refresh_bus.dart';
 import '../utils/schedule_sync_service.dart';
+import '../utils/schedule_widget_service.dart';
 import 'dart:math' as math;
 
 class ScheduleExplorerView extends StatefulWidget {
@@ -315,6 +316,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     required ScheduleType type,
     required String value,
     bool addToHistory = true,
+    bool saveAsCurrent = false,
   }) async {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return;
@@ -342,14 +344,16 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _dayFuture = null;
     });
 
-    await CurrentScheduleStorage.save(
-      ScheduleTarget(
-        type: type,
-        value: trimmed,
-      ),
-    );
+    if (saveAsCurrent) {
+      await CurrentScheduleStorage.save(
+        ScheduleTarget(
+          type: type,
+          value: trimmed,
+        ),
+      );
 
-    _runScheduleSideEffects();
+      _runCurrentScheduleSideEffects();
+    }
   }
 
   Future<void> _openTeacherSchedule(String teacher) async {
@@ -387,23 +391,16 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
       _dayFuture = null;
     });
 
-    await CurrentScheduleStorage.save(
-      ScheduleTarget(
-        type: previous.type,
-        value: previous.value,
-      ),
-    );
-
-    _runScheduleSideEffects();
   }
 
-  void _runScheduleSideEffects() {
+  void _runCurrentScheduleSideEffects() {
     unawaited(() async {
       try {
         await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
         await LocalNotificationService.instance.rescheduleAll();
+        await ScheduleWidgetService.instance.refreshInstalledWidget();
       } catch (_) {
-        // Не блокируем переход по ссылке из-за синхронизации и уведомлений.
+        // Не блокируем выбор расписания из-за фоновой синхронизации.
       }
     }());
   }
@@ -427,6 +424,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
               type: target.type,
               value: target.value,
               addToHistory: false,
+              saveAsCurrent: true,
             );
 
             if (!mounted) return;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../database/database_helper.dart';
@@ -28,6 +30,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
 
   int _requestId = 0;
   bool _isLoading = false;
+  Timer? _searchDebounce;
 
   List<_SuggestionItem> _groups = [];
   List<_SuggestionItem> _teachers = [];
@@ -35,8 +38,16 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _performSearch(query);
+    });
   }
 
   IconData _iconFor(ScheduleType type) => switch (type) {
@@ -229,7 +240,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
             child: TextField(
               controller: _searchController,
-              onChanged: _performSearch,
+              onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: 'Поиск группы, преподавателя или аудитории...',
                 prefixIcon: const Icon(Icons.search),
@@ -239,6 +250,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
                   icon: const Icon(Icons.clear),
                   onPressed: () {
                     _searchController.clear();
+                    _searchDebounce?.cancel();
                     _performSearch('');
                   },
                 ),

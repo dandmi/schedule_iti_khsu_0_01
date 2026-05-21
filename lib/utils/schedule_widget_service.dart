@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,15 +23,6 @@ class ScheduleWidgetService {
   final ApiClient _apiClient = ApiClient();
   final DatabaseHelper _db = DatabaseHelper();
 
-  static const Map<int, ({String start, String end})> _pairSlots = {
-    1: (start: '08:00', end: '09:30'),
-    2: (start: '09:40', end: '11:10'),
-    3: (start: '11:20', end: '12:50'),
-    4: (start: '13:30', end: '15:00'),
-    5: (start: '15:10', end: '16:40'),
-    6: (start: '16:50', end: '18:20'),
-    7: (start: '18:30', end: '20:00'),
-  };
 
   Future<String> createOrUpdateTodayWidget() async {
     if (!Platform.isAndroid) {
@@ -42,26 +34,20 @@ class ScheduleWidgetService {
       return 'Сначала выберите текущее расписание';
     }
 
-    await _saveWidgetDataForTarget(target);
+    await _saveWidgetPreparingData(target);
+    await _pinWidgetIfNeeded();
+    await _updateWidget();
 
-    final installedWidgets = await HomeWidget.getInstalledWidgets();
-    final hasInstalledWidget = installedWidgets.isNotEmpty;
-    final pinSupported =
-        await HomeWidget.isRequestPinWidgetSupported() ?? false;
+    unawaited(() async {
+      try {
+        await _saveWidgetDataForTarget(target);
+        await _updateWidget();
+      } catch (_) {
+        // Виджет уже создан. Ошибка загрузки расписания не должна блокировать UI.
+      }
+    }());
 
-    if (!hasInstalledWidget && pinSupported) {
-      await HomeWidget.requestPinWidget(
-        name: providerName,
-        androidName: providerName,
-      );
-    }
-
-    await HomeWidget.updateWidget(
-      name: providerName,
-      androidName: providerName,
-    );
-
-    return 'Виджет подготовлен';
+    return 'Виджет подготовлен. Расписание загружается';
   }
 
   Future<void> refreshInstalledWidget() async {
@@ -74,10 +60,65 @@ class ScheduleWidgetService {
     if (target == null) return;
 
     await _saveWidgetDataForTarget(target);
+    await _updateWidget();
+  }
 
-    await HomeWidget.updateWidget(
+  Future<void> _pinWidgetIfNeeded() async {
+    final installedWidgets = await HomeWidget.getInstalledWidgets();
+    final hasInstalledWidget = installedWidgets.isNotEmpty;
+    final pinSupported =
+        await HomeWidget.isRequestPinWidgetSupported() ?? false;
+
+    if (!hasInstalledWidget && pinSupported) {
+      await HomeWidget.requestPinWidget(
+        name: providerName,
+        androidName: providerName,
+      );
+    }
+  }
+
+  Future<void> _updateWidget() {
+    return HomeWidget.updateWidget(
       name: providerName,
       androidName: providerName,
+    );
+  }
+
+  Future<void> _saveWidgetPreparingData(ScheduleTarget target) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dateKey = _dateStr(today);
+
+    final payload = <String, dynamic>{
+      dateKey: {
+        'dateLabel': _dateLabel(today),
+        'items': [
+          {
+            'title': 'Расписание загружается',
+            'subtitle': 'Данные появятся после обновления',
+          },
+        ],
+      },
+    };
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_name',
+      target.value,
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_target_type',
+      target.type.name,
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_payload_json',
+      jsonEncode(payload),
+    );
+
+    await HomeWidget.saveWidgetData<String>(
+      'schedule_widget_generated_at',
+      DateTime.now().toIso8601String(),
     );
   }
 
@@ -85,6 +126,7 @@ class ScheduleWidgetService {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final payload = <String, dynamic>{};
+    final slots = await _db.getTimeSlots();
 
     for (var i = 0; i < preloadDays; i++) {
       final date = today.add(Duration(days: i));
@@ -102,6 +144,7 @@ class ScheduleWidgetService {
         'items': _buildWidgetItems(
           schedule: schedule,
           scheduleType: target.type,
+          slots: slots,
         ),
       };
     }
@@ -127,7 +170,7 @@ class ScheduleWidgetService {
     );
   }
 
-  Future<ScheduleResponse> _loadScheduleForDay({
+  Future<ScheduleResponse?> _loadScheduleForDay({
     required ScheduleType targetType,
     required String targetValue,
     required DateTime date,
@@ -158,6 +201,16 @@ class ScheduleWidgetService {
       }
     }
 
+    final hasSnapshot = await _db.hasScheduleSnapshot(
+      date: dateStr,
+      targetType: targetType.name,
+      targetValue: targetValue,
+    );
+
+    if (!hasSnapshot) {
+      return null;
+    }
+
     final cachedLessons = await _db.getSchedule(
       date: dateStr,
       targetType: targetType.name,
@@ -172,9 +225,19 @@ class ScheduleWidgetService {
   }
 
   List<Map<String, String>> _buildWidgetItems({
-    required ScheduleResponse schedule,
+    required ScheduleResponse? schedule,
     required ScheduleType scheduleType,
+    required Map<int, ({String start, String end})> slots,
   }) {
+    if (schedule == null) {
+      return [
+        {
+          'title': 'Данные не загружены',
+          'subtitle': 'Откройте приложение для обновления',
+        },
+      ];
+    }
+
     if (schedule.lessons.isEmpty) {
       return [
         {
@@ -187,7 +250,7 @@ class ScheduleWidgetService {
     final items = <Map<String, String>>[];
 
     for (final lesson in schedule.lessons) {
-      final slot = _pairSlots[lesson.time];
+      final slot = slots[lesson.time];
       final start = slot?.start ?? '--:--';
       final end = slot?.end ?? '--:--';
 

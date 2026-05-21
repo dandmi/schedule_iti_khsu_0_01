@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../database/database_helper.dart';
 import '../models/favorite_item.dart';
 import '../models/schedule_target.dart';
 import '../utils/current_schedule_storage.dart';
+import '../utils/local_notification_service.dart';
 import '../utils/schedule_type.dart';
+import '../utils/schedule_sync_service.dart';
+import '../utils/schedule_widget_service.dart';
 import '../views/schedule_explorer_view.dart';
 import '../utils/app_refresh_bus.dart';
 import 'add_favorite_screen.dart';
@@ -73,6 +78,19 @@ class ScheduleScreenState extends State<ScheduleScreen> {
     });
 
     AppRefreshBus.markScheduleChanged();
+    _runCurrentScheduleSideEffects();
+  }
+
+  void _runCurrentScheduleSideEffects() {
+    unawaited(() async {
+      try {
+        await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
+        await LocalNotificationService.instance.rescheduleAll();
+        await ScheduleWidgetService.instance.refreshInstalledWidget();
+      } catch (_) {
+        // Выбор расписания не должен блокироваться из-за фоновой синхронизации.
+      }
+    }());
   }
 
   Future<void> _openAddFavorite() async {
