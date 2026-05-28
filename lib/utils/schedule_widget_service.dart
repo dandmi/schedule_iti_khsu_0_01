@@ -18,7 +18,8 @@ class ScheduleWidgetService {
   ScheduleWidgetService._internal();
 
   static const String providerName = 'ScheduleTodayWidgetProvider';
-  static const int preloadDays = 7;
+  static const int preloadPastDays = 2;
+  static const int preloadFutureDays = 7;
 
   final ApiClient _apiClient = ApiClient();
   final DatabaseHelper _db = DatabaseHelper();
@@ -43,7 +44,6 @@ class ScheduleWidgetService {
         await _saveWidgetDataForTarget(target);
         await _updateWidget();
       } catch (_) {
-        // Виджет уже создан. Ошибка загрузки расписания не должна блокировать UI.
       }
     }());
 
@@ -110,6 +110,10 @@ class ScheduleWidgetService {
       'schedule_widget_target_type',
       target.type.name,
     );
+    await HomeWidget.saveWidgetData<int>(
+      'schedule_widget_day_offset',
+      0,
+    );
 
     await HomeWidget.saveWidgetData<String>(
       'schedule_widget_payload_json',
@@ -128,8 +132,10 @@ class ScheduleWidgetService {
     final payload = <String, dynamic>{};
     final slots = await _db.getTimeSlots();
 
-    for (var i = 0; i < preloadDays; i++) {
-      final date = today.add(Duration(days: i));
+    for (var offset = -preloadPastDays;
+        offset <= preloadFutureDays;
+        offset++) {
+      final date = today.add(Duration(days: offset));
 
       final schedule = await _loadScheduleForDay(
         targetType: target.type,
@@ -157,6 +163,10 @@ class ScheduleWidgetService {
     await HomeWidget.saveWidgetData<String>(
       'schedule_widget_target_type',
       target.type.name,
+    );
+    await HomeWidget.saveWidgetData<int>(
+      'schedule_widget_day_offset',
+      0,
     );
 
     await HomeWidget.saveWidgetData<String>(
@@ -196,8 +206,6 @@ class ScheduleWidgetService {
 
         return response;
       } catch (_) {
-        // Если загрузить расписание из сети не удалось,
-        // ниже будет использована локальная копия из БД.
       }
     }
 

@@ -111,6 +111,8 @@ class NotesScreenState extends State<NotesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return FutureBuilder<List<Note>>(
       future: _db.getNotes(),
       builder: (context, snap) {
@@ -131,43 +133,59 @@ class NotesScreenState extends State<NotesScreen> {
         }
 
         return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           itemCount: notes.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final n = notes[i];
 
             final title =
-                (n.title ?? '').trim().isEmpty ? '(без названия)' : n.title!.trim();
+            (n.title ?? '').trim().isEmpty ? '(без названия)' : n.title!.trim();
 
             final desc = (n.description ?? '').trim();
             final subject = (n.subject ?? '').trim();
             final dueText =
-                n.dueAt != null ? 'Срок: ${_formatDateTime(n.dueAt!)}' : '';
+            n.dueAt != null ? 'Срок: ${_formatDateTime(n.dueAt!)}' : '';
 
             final subtitleParts = <String>[];
             if (subject.isNotEmpty) subtitleParts.add('Предмет: $subject');
             if (desc.isNotEmpty) subtitleParts.add(desc);
             if (dueText.isNotEmpty) subtitleParts.add(dueText);
 
-            return ListTile(
-              title: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: subtitleParts.isEmpty
-                  ? null
-                  : Text(
-                      subtitleParts.join('\n'),
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
+            return Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                contentPadding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                title: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                subtitle: subtitleParts.isEmpty
+                    ? null
+                    : Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    subtitleParts.join('\n'),
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
                     ),
-              trailing: IconButton(
-                tooltip: 'Удалить',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _delete(n),
+                  ),
+                ),
+                trailing: IconButton(
+                  tooltip: 'Удалить',
+                  color: scheme.onSurfaceVariant,
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _delete(n),
+                ),
+                onTap: () => _openEdit(n),
               ),
-              onTap: () => _openEdit(n),
             );
           },
         );

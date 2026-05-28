@@ -20,7 +20,7 @@ class MainLayout extends StatelessWidget {
   static const List<String> _titles = [
     'Расписание',
     'Заметки',
-    'Доп. возможности',
+    'Дополнительные возможности',
   ];
 
   @override
@@ -30,34 +30,56 @@ class MainLayout extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: scheme.primaryContainer,
-        foregroundColor: scheme.onPrimaryContainer,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark
+            ? scheme.surface
+            : scheme.primary,
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? scheme.onSurface
+            : scheme.onPrimary,
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
-        title: Text(appTitle),
+        toolbarHeight: 64,
+        title: Text(
+          appTitle,
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? scheme.onSurface
+                : scheme.onPrimary,
+          ),
+        ),
       ),
       body: body,
       floatingActionButton: floatingActionButton,
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: currentIndex,
-        onTap: onIndexChanged,
-        backgroundColor: scheme.surface,
-        selectedItemColor: scheme.primary,
-        unselectedItemColor: scheme.onSurfaceVariant,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.schedule),
-            label: 'Расписание',
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(
+            top: BorderSide(color: scheme.outlineVariant),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.book),
-            label: 'Заметки',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Доп. возможности',
-          ),
-        ],
+        ),
+        child: BottomNavigationBar(
+          currentIndex: currentIndex,
+          onTap: onIndexChanged,
+          backgroundColor: scheme.surface,
+          selectedItemColor: scheme.primary,
+          unselectedItemColor: scheme.onSurfaceVariant,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.schedule),
+              label: 'Расписание',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.book),
+              label: 'Заметки',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings),
+              label: 'Доп. возможности',
+            ),
+          ],
+        ),
       ),
     );
   }

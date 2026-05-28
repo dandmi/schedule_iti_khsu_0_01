@@ -68,6 +68,41 @@ class ScheduleScreenState extends State<ScheduleScreen> {
     });
   }
 
+  Future<void> openCurrentScheduleToday() async {
+    final target = await CurrentScheduleStorage.load();
+
+    if (!mounted) return;
+
+    if (target == null) {
+      setState(() {
+        _initialTargetFuture = Future.value(null);
+      });
+      return;
+    }
+
+    final currentSnapshot = await _initialTargetFuture;
+
+    final sameTarget = currentSnapshot?.type == target.type &&
+        currentSnapshot?.value == target.value;
+
+    if (sameTarget && _explorerKey.currentState != null) {
+      await _explorerKey.currentState?.resetToCurrentScheduleToday(
+        target: target,
+      );
+      return;
+    }
+
+    setState(() {
+      _initialTargetFuture = Future.value(target);
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _explorerKey.currentState?.resetToCurrentScheduleToday(
+        target: target,
+      );
+    });
+  }
+
   Future<void> _selectTarget(ScheduleTarget target) async {
     await CurrentScheduleStorage.save(target);
 
@@ -77,7 +112,6 @@ class ScheduleScreenState extends State<ScheduleScreen> {
       _initialTargetFuture = Future.value(target);
     });
 
-    AppRefreshBus.markScheduleChanged();
     _runCurrentScheduleSideEffects();
   }
 
@@ -88,7 +122,6 @@ class ScheduleScreenState extends State<ScheduleScreen> {
         await LocalNotificationService.instance.rescheduleAll();
         await ScheduleWidgetService.instance.refreshInstalledWidget();
       } catch (_) {
-        // Выбор расписания не должен блокироваться из-за фоновой синхронизации.
       }
     }());
   }
@@ -103,6 +136,45 @@ class ScheduleScreenState extends State<ScheduleScreen> {
     if (!mounted || target == null) return;
 
     await _selectTarget(target);
+  }
+
+  Future<void> _deleteFavorite(FavoriteItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Удалить расписание?'),
+          content: Text(
+            'Расписание «${item.name}» будет удалено из избранного.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    await _db.removeFavorite(item.id);
+
+    if (!mounted) return;
+
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Расписание удалено из избранного')),
+    );
   }
 
   IconData _iconFor(ScheduleType type) {
@@ -183,6 +255,14 @@ class ScheduleScreenState extends State<ScheduleScreen> {
                               leading: Icon(_iconFor(item.scheduleType)),
                               title: Text(item.name),
                               subtitle: Text(_labelFor(item.scheduleType)),
+                              trailing: IconButton(
+                                tooltip: 'Удалить из избранного',
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: scheme.error,
+                                ),
+                                onPressed: () => _deleteFavorite(item),
+                              ),
                               onTap: () => _selectTarget(
                                 ScheduleTarget(
                                   type: item.scheduleType,

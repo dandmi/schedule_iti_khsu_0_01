@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'utils/local_notification_service.dart';
 import 'utils/theme_storage.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,22 +59,33 @@ class _MyAppState extends State<MyApp> {
         home: Scaffold(
           body: Center(child: CircularProgressIndicator()),
         ),
+        locale: Locale('ru', 'RU'),
+        supportedLocales: [
+          Locale('ru', 'RU'),
+        ],
+        localizationsDelegates: [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
       );
     }
 
     return MaterialApp(
       title: 'Расписание ХГУ',
+      locale: const Locale('ru', 'RU'),
+      supportedLocales: const [
+        Locale('ru', 'RU'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      themeAnimationDuration: Duration.zero,
       themeMode: mode,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        colorSchemeSeed: Colors.green,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: Colors.green,
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
       home: HomeScreen(
         themeMode: mode,
         onThemeModeChanged: _setThemeMode,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../utils/local_notification_service.dart';
@@ -20,6 +22,7 @@ class _NotificationSettingsScreenState
       NotificationSettingsStorage.noteReminderOptions;
 
   bool _isLoading = true;
+  bool _isSaving = false;
 
   bool _lessonReminderEnabled = false;
   int _lessonReminderMinutesBefore = 15;
@@ -55,6 +58,15 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _save() async {
+    if (_isSaving) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    setState(() {
+      _isSaving = true;
+    });
+
     final settings = NotificationSettingsData(
       lessonReminderEnabled: _lessonReminderEnabled,
       lessonReminderMinutesBefore: _lessonReminderMinutesBefore,
@@ -65,16 +77,34 @@ class _NotificationSettingsScreenState
       tomorrowSummaryMinute: _tomorrowSummaryMinute,
     );
 
-    await NotificationSettingsStorage.save(settings);
-    await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
-    await LocalNotificationService.instance.requestPermissions();
-    await LocalNotificationService.instance.rescheduleAll();
+    try {
+      await NotificationSettingsStorage.save(settings);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Настройки уведомлений сохранены')),
-    );
+      navigator.pop();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Настройки уведомлений сохранены')),
+      );
+
+      unawaited(() async {
+        try {
+          await LocalNotificationService.instance.requestPermissions();
+          await ScheduleSyncService.instance.syncCurrentAndFavoritesFutureDates();
+          await LocalNotificationService.instance.rescheduleAll();
+        } catch (_) {}
+      }());
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSaving = false;
+      });
+
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить настройки: $e')),
+      );
+    }
   }
 
   Future<void> _pickTomorrowTime() async {
@@ -297,9 +327,15 @@ class _NotificationSettingsScreenState
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _save,
-              icon: const Icon(Icons.save),
-              label: const Text('Сохранить'),
+              onPressed: _isSaving ? null : _save,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save),
+              label: Text(_isSaving ? 'Сохранение...' : 'Сохранить'),
             ),
           ),
         ],

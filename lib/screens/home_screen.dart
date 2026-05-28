@@ -85,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrapData() async {
-    await _refreshBackgroundData(markScheduleChanged: true);
+    await _refreshBackgroundData(markScheduleChanged: false);
   }
 
   void _buildPages() {
@@ -100,6 +100,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onTab(int i) {
+    if (i == _index) {
+      if (i == 0) {
+        _scheduleKey.currentState?.openCurrentScheduleToday();
+      }
+      return;
+    }
+
     setState(() => _index = i);
   }
 

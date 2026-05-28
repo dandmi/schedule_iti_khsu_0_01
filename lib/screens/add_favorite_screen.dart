@@ -231,7 +231,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Добавить в избранное'),
+        title: const Text('Найти расписание'),
         centerTitle: true,
       ),
       body: Column(
@@ -242,7 +242,7 @@ class _AddFavoriteScreenState extends State<AddFavoriteScreen> {
               controller: _searchController,
               onChanged: _onSearchChanged,
               decoration: InputDecoration(
-                hintText: 'Поиск группы, преподавателя или аудитории...',
+                hintText: 'Введите группу, преподавателя или аудиторию',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searchController.text.isEmpty
                     ? null

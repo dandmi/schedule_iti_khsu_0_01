@@ -96,7 +96,7 @@ class SettingsScreen extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),
@@ -133,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),
@@ -156,7 +156,7 @@ class SettingsScreen extends StatelessWidget {
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),
@@ -172,7 +172,7 @@ class SettingsScreen extends StatelessWidget {
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),
@@ -188,7 +188,7 @@ class SettingsScreen extends StatelessWidget {
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),
@@ -205,7 +205,7 @@ class SettingsScreen extends StatelessWidget {
         Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            color: scheme.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: scheme.outlineVariant),
           ),

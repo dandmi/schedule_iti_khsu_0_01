@@ -1,7 +1,5 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-
 import '../api/api_client.dart';
 import '../database/database_helper.dart';
 import '../models/favorite_item.dart';
@@ -16,6 +14,7 @@ import '../utils/schedule_type.dart';
 import '../utils/app_refresh_bus.dart';
 import '../utils/schedule_sync_service.dart';
 import '../utils/schedule_widget_service.dart';
+import '../theme/app_colors.dart';
 import 'dart:math' as math;
 
 class ScheduleExplorerView extends StatefulWidget {
@@ -109,6 +108,26 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     setState(() {
       _reloadSideData();
       _dayFuture = null;
+    });
+  }
+
+  Future<void> resetToCurrentScheduleToday({
+    ScheduleTarget? target,
+  }) async {
+    final currentTarget = target ?? await CurrentScheduleStorage.load();
+
+    if (!mounted || currentTarget == null) return;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    setState(() {
+      _scheduleType = currentTarget.type;
+      _selectedItem = currentTarget.value;
+      _selectedDate = today;
+      _history.clear();
+      _dayFuture = null;
+      _reloadSideData();
     });
   }
 
@@ -400,44 +419,268 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
         await LocalNotificationService.instance.rescheduleAll();
         await ScheduleWidgetService.instance.refreshInstalledWidget();
       } catch (_) {
-        // Не блокируем выбор расписания из-за фоновой синхронизации.
       }
     }());
   }
 
-  Future<void> _openFavoritesSheet() async {
-    await showModalBottomSheet<void>(
+  Future<void> _openFavoritesMenu(BuildContext anchorContext) async {
+    final favorites = await _db.getFavorites();
+
+    if (!mounted || !anchorContext.mounted) return;
+
+    final anchorBox = anchorContext.findRenderObject() as RenderBox?;
+    final overlayBox =
+    Overlay.of(anchorContext).context.findRenderObject() as RenderBox?;
+
+    if (anchorBox == null || overlayBox == null) return;
+
+    final anchorTopLeft = anchorBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayBox,
+    );
+
+    final menuRect = Rect.fromLTWH(
+      anchorTopLeft.dx,
+      anchorTopLeft.dy + anchorBox.size.height + 6,
+      anchorBox.size.width,
+      1,
+    );
+
+    final selectedAction = await showMenu<_FavoriteMenuAction>(
       context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return _FavoritesBottomSheet(
-          db: _db,
-          activeType: _scheduleType,
-          activeValue: _selectedItem,
-          onTargetChosen: (target) async {
-            if (Navigator.of(sheetContext).canPop()) {
-              Navigator.of(sheetContext).pop();
-            }
+      position: RelativeRect.fromRect(
+        menuRect,
+        Offset.zero & overlayBox.size,
+      ),
+      constraints: BoxConstraints(
+        minWidth: anchorBox.size.width,
+        maxWidth: anchorBox.size.width,
+      ),
+      items: [
+        PopupMenuItem<_FavoriteMenuAction>(
+          enabled: false,
+          height: 38,
+          child: Text(
+            'Выбор расписания',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ),
 
-            await _openScheduleTarget(
-              type: target.type,
-              value: target.value,
-              addToHistory: false,
-              saveAsCurrent: true,
-            );
+        if (favorites.isEmpty)
+          PopupMenuItem<_FavoriteMenuAction>(
+            enabled: false,
+            child: Text(
+              'Сохранённых расписаний нет',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
 
-            if (!mounted) return;
+        for (final item in favorites)
+          PopupMenuItem<_FavoriteMenuAction>(
+            enabled: false,
+            padding: EdgeInsets.zero,
+            child: Builder(
+              builder: (menuItemContext) {
+                final scheme = Theme.of(context).colorScheme;
+                final selected = item.scheduleType == _scheduleType &&
+                    item.name == _selectedItem;
 
-            AppRefreshBus.markScheduleChanged();
+                return DefaultTextStyle.merge(
+                  style: TextStyle(color: scheme.onSurface),
+                  child: IconTheme(
+                    data: IconThemeData(color: scheme.primary),
+                    child: InkWell(
+                      onTap: () => Navigator.pop(
+                        menuItemContext,
+                        _FavoriteMenuAction.select(item),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
+                        child: Row(
+                          children: [
+                            Icon(_typeIcon(item.scheduleType), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: scheme.onSurface,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    item.scheduleType.label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (selected)
+                              Icon(
+                                Icons.check_rounded,
+                                color: scheme.primary,
+                              ),
+                            IconButton(
+                              tooltip: 'Удалить из избранного',
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(
+                                Icons.delete_outline_rounded,
+                                color: scheme.error,
+                              ),
+                              onPressed: () => Navigator.pop(
+                                menuItemContext,
+                                _FavoriteMenuAction.delete(item),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
 
-            setState(() {
-              _reloadSideData();
-            });
-          },
+        const PopupMenuDivider(height: 1),
+
+        PopupMenuItem<_FavoriteMenuAction>(
+          value: const _FavoriteMenuAction.add(),
+          child: Row(
+            children: [
+              Icon(
+                Icons.add_rounded,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              const Text('Найти расписание'),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (!mounted || selectedAction == null) return;
+
+    if (selectedAction.isAdd) {
+      final target = await Navigator.of(context).push<ScheduleTarget>(
+        MaterialPageRoute(
+          builder: (_) => const AddFavoriteScreen(),
+        ),
+      );
+
+      if (!mounted || target == null) return;
+
+      await _openScheduleTarget(
+        type: target.type,
+        value: target.value,
+        addToHistory: false,
+        saveAsCurrent: true,
+      );
+
+      return;
+    }
+
+    if (selectedAction.isDelete) {
+      final item = selectedAction.item;
+      if (item == null) return;
+      await _confirmDeleteFavorite(item);
+      return;
+    }
+
+    final item = selectedAction.item;
+    if (item == null) return;
+
+    await _openScheduleTarget(
+      type: item.scheduleType,
+      value: item.name,
+      addToHistory: false,
+      saveAsCurrent: true,
+    );
+
+  }
+
+  Future<void> _confirmDeleteFavorite(FavoriteItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Удалить расписание?'),
+          content: Text(
+            'Расписание «${item.name}» будет удалено из избранного.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(dialogContext).colorScheme.error,
+              ),
+              child: const Text('Удалить'),
+            ),
+          ],
         );
       },
     );
+
+    if (confirmed != true || !mounted) return;
+
+    await _db.removeFavorite(item.id);
+
+    final deletedCurrent =
+        item.scheduleType == _scheduleType && item.name == _selectedItem;
+
+    if (deletedCurrent) {
+      final remainingFavorites = await _db.getFavorites();
+
+      if (remainingFavorites.isEmpty) {
+        await CurrentScheduleStorage.clear();
+        AppRefreshBus.markScheduleChanged();
+      } else {
+        final next = remainingFavorites.first;
+        await _openScheduleTarget(
+          type: next.scheduleType,
+          value: next.name,
+          addToHistory: false,
+          saveAsCurrent: true,
+        );
+        if (mounted) {
+          setState(() {
+            _reloadSideData();
+          });
+        }
+      }
+    } else {
+      setState(() {
+        _reloadSideData();
+      });
+    }
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Расписание удалено из избранного')),
+    );
+
+    _runCurrentScheduleSideEffects();
   }
 
   IconData _typeIcon(ScheduleType type) {
@@ -469,6 +712,20 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     ];
 
     return '${date.day} ${months[date.month]} ${date.year}';
+  }
+
+  String _formatWeekday(DateTime date) {
+    const weekdays = [
+      'Понедельник',
+      'Вторник',
+      'Среда',
+      'Четверг',
+      'Пятница',
+      'Суббота',
+      'Воскресенье',
+    ];
+
+    return weekdays[date.weekday - 1];
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
@@ -538,80 +795,13 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
     );
   }
 
-  _LessonBlockStyle _lessonBlockStyle(
+  LessonBlockStyle _lessonBlockStyle(
       BuildContext context,
       String typeLesson,
       ) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final t = typeLesson.toLowerCase().trim();
-
-    if (t.contains('зач') || t.contains('экз')) {
-      return isDark
-          ? const _LessonBlockStyle(
-        background: Color(0xFF4B2228),
-        border: Color(0xFF8F4A56),
-        accent: Color(0xFFFFB3C1),
-      )
-          : const _LessonBlockStyle(
-        background: Color(0xFFFFE6EA),
-        border: Color(0xFFE7B5BF),
-        accent: Color(0xFF9C2F45),
-      );
-    }
-
-    if (t.contains('лаб')) {
-      return isDark
-          ? const _LessonBlockStyle(
-        background: Color(0xFF3A2D16),
-        border: Color(0xFF7B6335),
-        accent: Color(0xFFFFD98A),
-      )
-          : const _LessonBlockStyle(
-        background: Color(0xFFFFF2D6),
-        border: Color(0xFFE6D09B),
-        accent: Color(0xFF8A6200),
-      );
-    }
-
-    if (t.contains('пр')) {
-      return isDark
-          ? const _LessonBlockStyle(
-        background: Color(0xFF24344A),
-        border: Color(0xFF4A6D98),
-        accent: Color(0xFFB8D5FF),
-      )
-          : const _LessonBlockStyle(
-        background: Color(0xFFE6F0FF),
-        border: Color(0xFFB8CCE8),
-        accent: Color(0xFF2C5EAA),
-      );
-    }
-
-    if (t.contains('л')) {
-      return isDark
-          ? const _LessonBlockStyle(
-        background: Color(0xFF203629),
-        border: Color(0xFF4B7B5E),
-        accent: Color(0xFFBDE8C7),
-      )
-          : const _LessonBlockStyle(
-        background: Color(0xFFE4F5E8),
-        border: Color(0xFFB8D8BF),
-        accent: Color(0xFF2B7642),
-      );
-    }
-
-    return isDark
-        ? const _LessonBlockStyle(
-      background: Color(0xFF2E2E31),
-      border: Color(0xFF55585E),
-      accent: Color(0xFFE6E7EA),
-    )
-        : const _LessonBlockStyle(
-      background: Color(0xFFF1F2F4),
-      border: Color(0xFFD7DADE),
-      accent: Color(0xFF2B2E33),
+    return AppColors.lessonStyle(
+      context: context,
+      typeLesson: typeLesson,
     );
   }
 
@@ -619,9 +809,10 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
   Widget build(BuildContext context) {
     final header = ScheduleTopHeader(
       title: _selectedItem,
+      subtitle: 'Открыто расписание',
       icon: _typeIcon(_scheduleType),
       onRefresh: _refreshSchedule,
-      onTap: _openFavoritesSheet,
+      onTap: _openFavoritesMenu,
       showDropdownChevron: true,
     );
 
@@ -636,6 +827,7 @@ class ScheduleExplorerViewState extends State<ScheduleExplorerView> {
           header,
           _DatePager(
             dateText: _formatDate(_selectedDate),
+            weekdayText: _formatWeekday(_selectedDate),
             onPrev: () => _changeDate(-1),
             onNext: () => _changeDate(1),
           ),
@@ -742,6 +934,25 @@ class _ScheduleNavigationEntry {
   });
 }
 
+class _FavoriteMenuAction {
+  final FavoriteItem? item;
+  final bool isAdd;
+  final bool isDelete;
+
+  const _FavoriteMenuAction.select(this.item)
+      : isAdd = false,
+        isDelete = false;
+
+  const _FavoriteMenuAction.add()
+      : item = null,
+        isAdd = true,
+        isDelete = false;
+
+  const _FavoriteMenuAction.delete(this.item)
+      : isAdd = false,
+        isDelete = true;
+}
+
 class _LessonTiming {
   final DateTime start;
   final DateTime end;
@@ -760,28 +971,19 @@ class _LessonTiming {
   });
 }
 
-class _LessonBlockStyle {
-  final Color background;
-  final Color border;
-  final Color accent;
-
-  const _LessonBlockStyle({
-    required this.background,
-    required this.border,
-    required this.accent,
-  });
-}
 
 class ScheduleTopHeader extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final IconData icon;
   final VoidCallback onRefresh;
-  final VoidCallback? onTap;
+  final Future<void> Function(BuildContext anchorContext)? onTap;
   final bool showDropdownChevron;
 
   const ScheduleTopHeader({
     super.key,
     required this.title,
+    this.subtitle,
     required this.icon,
     required this.onRefresh,
     this.onTap,
@@ -801,48 +1003,96 @@ class ScheduleTopHeader extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: onTap,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: scheme.onPrimaryContainer.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color:
-                        scheme.onPrimaryContainer.withValues(alpha: 0.10),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(icon, color: scheme.onPrimaryContainer),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onPrimaryContainer,
+                child: Builder(
+                  builder: (anchorContext) {
+                    return Semantics(
+                      button: true,
+                      label: 'Выбрать расписание',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: onTap == null
+                            ? null
+                            : () => onTap!(anchorContext),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.schedulePickerBackground(context),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: scheme.outlineVariant,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                icon,
+                                color: scheme.onPrimaryContainer,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (subtitle != null) ...[
+                                      Text(
+                                        subtitle!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: scheme.onPrimaryContainer
+                                              .withValues(alpha: 0.72),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                    ],
+                                    Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                        color: scheme.onPrimaryContainer,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (showDropdownChevron) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  width: 30,
+                                  height: 30,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: scheme.onPrimaryContainer
+                                        .withValues(alpha: 0.10),
+                                  ),
+                                  child: Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                    color: scheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
-                        if (showDropdownChevron) ...[
-                          const SizedBox(width: 8),
-                          Icon(
-                            Icons.arrow_drop_down_rounded,
-                            color: scheme.onPrimaryContainer,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -864,11 +1114,13 @@ class ScheduleTopHeader extends StatelessWidget {
 
 class _DatePager extends StatelessWidget {
   final String dateText;
+  final String weekdayText;
   final VoidCallback onPrev;
   final VoidCallback onNext;
 
   const _DatePager({
     required this.dateText,
+    required this.weekdayText,
     required this.onPrev,
     required this.onNext,
   });
@@ -894,13 +1146,27 @@ class _DatePager extends StatelessWidget {
             ),
             Expanded(
               child: Center(
-                child: Text(
-                  dateText,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurface,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      dateText,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      weekdayText,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1013,7 +1279,7 @@ class _ScheduleLoadError extends StatelessWidget {
 
 class _LessonCard extends StatelessWidget {
   final Lesson lesson;
-  final _LessonBlockStyle style;
+  final LessonBlockStyle style;
   final ScheduleType scheduleType;
   final _LessonTiming? timing;
   final bool hasNote;
@@ -1370,177 +1636,6 @@ class _LessonLinkChip extends StatelessWidget {
             color: scheme.onSurface,
             fontWeight: FontWeight.w500,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavoritesBottomSheet extends StatefulWidget {
-  final DatabaseHelper db;
-  final ScheduleType activeType;
-  final String activeValue;
-  final Future<void> Function(ScheduleTarget target) onTargetChosen;
-
-  const _FavoritesBottomSheet({
-    required this.db,
-    required this.activeType,
-    required this.activeValue,
-    required this.onTargetChosen,
-  });
-
-  @override
-  State<_FavoritesBottomSheet> createState() => _FavoritesBottomSheetState();
-}
-
-class _FavoritesBottomSheetState extends State<_FavoritesBottomSheet> {
-  bool _isLoading = true;
-  List<FavoriteItem> _favorites = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadFavorites();
-  }
-
-  Future<void> _loadFavorites() async {
-    final favorites = await widget.db.getFavorites();
-
-    if (!mounted) return;
-
-    setState(() {
-      _favorites = favorites;
-      _isLoading = false;
-    });
-  }
-
-  IconData _iconFor(ScheduleType type) {
-    switch (type) {
-      case ScheduleType.group:
-        return Icons.groups_rounded;
-      case ScheduleType.teacher:
-        return Icons.person_rounded;
-      case ScheduleType.auditory:
-        return Icons.meeting_room_rounded;
-    }
-  }
-
-  Future<void> _deleteFavorite(FavoriteItem item) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Удаление избранного'),
-          content: Text('Удалить "${item.name}" из избранного?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Удалить'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    await widget.db.removeFavorite(item.id);
-
-    if (!mounted) return;
-
-    setState(() {
-      _favorites.removeWhere((e) => e.id == item.id);
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Удалено: ${item.name}')),
-    );
-  }
-
-  Future<void> _addFavorite() async {
-    final target = await Navigator.of(context).push<ScheduleTarget>(
-      MaterialPageRoute(
-        builder: (_) => const AddFavoriteScreen(),
-      ),
-    );
-
-    if (!mounted || target == null) return;
-
-    await _loadFavorites();
-
-    if (!mounted) return;
-
-    await widget.onTargetChosen(target);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const SafeArea(
-        child: SizedBox(
-          height: 240,
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
-
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 480),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text(
-                'Избранные расписания',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final item in _favorites)
-                    ListTile(
-                      leading: Icon(_iconFor(item.scheduleType)),
-                      title: Text(item.name),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (item.scheduleType == widget.activeType &&
-                              item.name == widget.activeValue)
-                            const Icon(
-                              Icons.check_circle_rounded,
-                              color: Colors.green,
-                            ),
-                          IconButton(
-                            tooltip: 'Удалить',
-                            onPressed: () => _deleteFavorite(item),
-                            icon: const Icon(Icons.delete_outline_rounded),
-                          ),
-                        ],
-                      ),
-                      onTap: () => widget.onTargetChosen(
-                        ScheduleTarget(
-                          type: item.scheduleType,
-                          value: item.name,
-                        ),
-                      ),
-                    ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.add_rounded),
-                    title: const Text('Добавить в избранное'),
-                    onTap: _addFavorite,
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
